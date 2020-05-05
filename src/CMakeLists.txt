@@ -94,6 +94,8 @@ add_subdirectory(pugixml)
 
 include(find_tpls)
 setupTPLs()
+
+find_package(HDF5 REQUIRED)
 #------------------------------------------------------------------------------#
 # Report build configuration
 
@@ -148,6 +150,8 @@ set( branson_deps
   pugixml)
 if( VIZ_LIBRARIES_FOUND )
   set( branson_deps "Silo::silo;${HDF5_LIBRARIES};${branson_deps}" )
+else()
+  set (branson_deps "${HDF5_LIBRARIES};${branson_deps}")
 endif()
 target_link_libraries( BRANSON PUBLIC ${branson_deps} )
 

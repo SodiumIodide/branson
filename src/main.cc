@@ -25,6 +25,8 @@
 #include "mpi_types.h"
 #include "replicated_driver.h"
 #include "timer.h"
+#include "random_overlay.h"
+#include "time_overlay.h"
 
 using std::cout;
 using std::endl;
@@ -40,7 +42,7 @@ int main(int argc, char **argv) {
     exit(EXIT_FAILURE);
   }
 
-  // wrap main loop scope so objcts are destroyed before mpi_finalize is called
+  // wrap main loop scope so objects are destroyed before mpi_finalize is called
   {
     // get MPI parmeters and set them in mpi_info
     const Info mpi_info;
@@ -64,43 +66,82 @@ int main(int argc, char **argv) {
     // get input object from filename
     std::string filename(argv[1]);
     Input input(filename, mpi_types);
+    int num_realizations, realization_print; // used for random problem
+    bool random_problem = input.get_random_problem();
+    bool write_output;
+    if (random_problem) {
+      cout << "DETECTED RANDOM PROBLEM" << endl << endl;
+      num_realizations = input.get_num_realizations();
+      realization_print = input.get_realization_print();
+      write_output = false;
+    } else {
+      num_realizations = 1;
+      write_output = true;
+    }
     if (mpi_info.get_rank() == 0)
       input.print_problem_info();
-
-    // IMC paramters setup
-    IMC_Parameters imc_p(input);
-
-    // IMC state setup
-    IMC_State imc_state(input, mpi_info.get_rank());
 
     // timing
     Timer timers;
 
-    // make mesh from input object
-    timers.start_timer("Total setup");
+    // Overlay structure for random problems
+    Time_Overlay time_overlay(input);
 
-    Mesh mesh(input, mpi_types, mpi_info, imc_p);
-    mesh.initialize_physical_properties(input);
+    for (int i = 0; i < num_realizations; i++) {
+      if (random_problem) {
+        // re-generate geometry
+        input.generate_geometry();
+      }
 
-    timers.stop_timer("Total setup");
+      // IMC paramters setup
+      IMC_Parameters imc_p(input);
 
-    MPI_Barrier(MPI_COMM_WORLD);
-    // print_MPI_out(mesh, rank, n_rank);
+      // IMC state setup
+      IMC_State imc_state(input, mpi_info.get_rank());
 
-    //--------------------------------------------------------------------------//
-    // TRT PHYSICS CALCULATION
-    //--------------------------------------------------------------------------//
+      if (!random_problem) {
+        // make mesh from input object
+        timers.start_timer("Total setup");
+      }
 
-    timers.start_timer("Total transport");
+      Mesh mesh(input, mpi_types, mpi_info, imc_p);
+      mesh.initialize_physical_properties(input);
 
-    imc_replicated_driver(mesh, imc_state, imc_p, mpi_types, mpi_info);
+      if (!random_problem) {
+        timers.stop_timer("Total setup");
+      }
 
-    timers.stop_timer("Total transport");
+      MPI_Barrier(MPI_COMM_WORLD);
+      // print_MPI_out(mesh, rank, n_rank);
 
-    if (mpi_info.get_rank() == 0) {
+      //--------------------------------------------------------------------------//
+      // TRT PHYSICS CALCULATION
+      //--------------------------------------------------------------------------//
+
+      if (!random_problem)
+        timers.start_timer("Total transport");
+
+      imc_replicated_driver(mesh, imc_state, imc_p, mpi_types, mpi_info, write_output, random_problem, time_overlay);
+
+      if (random_problem) {
+        MPI_Barrier(MPI_COMM_WORLD);
+        if ((i + 1) % realization_print == 0) {
+          cout << "Realization number " << (i + 1) << endl;
+        }
+      }
+
+      if (!random_problem)
+        timers.stop_timer("Total transport");
+    }
+
+    if (!random_problem && mpi_info.get_rank() == 0) {
       cout << "****************************************";
       cout << "****************************************" << endl;
       timers.print_timers();
+    }
+
+    if (random_problem) {
+      time_overlay.print_all(mpi_info.get_rank());
     }
 
   } // end main loop scope, objects destroyed here

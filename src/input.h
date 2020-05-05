@@ -20,12 +20,15 @@
 #include <stdlib.h>
 #include <string>
 #include <unordered_map>
+#include <cmath>
 
 #include "config.h"
 #include "constants.h"
 #include "mpi.h"
 #include "mpi_types.h"
 #include "region.h"
+
+#include "RNG.h"
 
 //==============================================================================
 /*!
@@ -91,6 +94,8 @@ public:
       pugi::xml_node spatial_node = doc.child("prototype").child("spatial");
       pugi::xml_node simple_spatial_node =
           doc.child("prototype").child("simple_spatial");
+      pugi::xml_node random_spatial_node =
+          doc.child("prototype").child("random_spatial");
       pugi::xml_node bc_node = doc.child("prototype").child("boundary");
       pugi::xml_node region_node = doc.child("prototype").child("regions");
 
@@ -98,22 +103,22 @@ public:
         std::cout << "'common' section not found!" << std::endl;
         exit(EXIT_FAILURE);
       }
-      if (!spatial_node && !simple_spatial_node) {
-        std::cout << "'spatial' or 'simple_spatial' section not found!"
+      if (!spatial_node && !simple_spatial_node && !random_spatial_node) {
+        std::cout << "'spatial' or 'simple_spatial' or 'random_spatial' section not found!"
                   << std::endl;
         exit(EXIT_FAILURE);
       }
-      if (spatial_node && simple_spatial_node) {
+      if ((spatial_node && simple_spatial_node) || (spatial_node && random_spatial_node) && (simple_spatial_node && random_spatial_node)) {
         std::cout
-            << "Cannot specify both 'spatial' and 'simple_spatial' sections!"
+            << "Cannot specify more than one spatial section!"
             << std::endl;
         exit(EXIT_FAILURE);
       }
-      if (!bc_node) {
+      if (!bc_node && !random_spatial_node) {
         std::cout << "'boundary' section not found!" << std::endl;
         exit(EXIT_FAILURE);
       }
-      if (!region_node) {
+      if (!region_node && !random_spatial_node) {
         std::cout << "'regions' section not found!" << std::endl;
         exit(EXIT_FAILURE);
       }
@@ -278,119 +283,199 @@ public:
         region_map[0] = region_ID;
       }
 
-      // read in boundary conditions
-      bool b_error = false;
-      tempString = bc_node.child_value("bc_right");
-      if (tempString == "REFLECT")
-        bc[X_POS] = REFLECT;
-      else if (tempString == "VACUUM")
-        bc[X_POS] = VACUUM;
-      else
-        b_error = true;
+      // spatial inputs
+      if (random_spatial_node) {
+        int geometry_seed;
+        double d_x_end;
+        int id;
+        double chord_start, chord_end, opacA, opacB, opacC, opacS, temp_e, temp_r, dens, spec_heat;
+        random_problem = true;
 
-      tempString = bc_node.child_value("bc_left");
-      if (tempString == "REFLECT")
-        bc[X_NEG] = REFLECT;
-      else if (tempString == "VACUUM")
-        bc[X_NEG] = VACUUM;
-      else
-        b_error = true;
+        ny_divisions = 1;
+        nz_divisions = 1;
 
-      tempString = bc_node.child_value("bc_up");
-      if (tempString == "REFLECT")
-        bc[Y_POS] = REFLECT;
-      else if (tempString == "VACUUM")
-        bc[Y_POS] = VACUUM;
-      else
-        b_error = true;
+        for (pugi::xml_node_iterator it = random_spatial_node.begin(); it != random_spatial_node.end(); it++) {
+          std::string name_string = it->name();
+          if (name_string == "problem") {
+            num_materials = it->child("materials").text().as_int();
+            problem_dist = it->child("distance").text().as_double();
+            column_size = it->child("column_size").text().as_double();
+            chord_model = it->child("chord_model").text().as_string();
+            geometry_seed = it->child("geometry_seed").text().as_int();
+            sublayer_cells = it->child("sublayer_cells").text().as_int();
+            structured_cells = it->child("structured_cells").text().as_int();
+            num_realizations = it->child("realizations").text().as_int();
+            realization_print = it->child("realization_print").text().as_int();
+          }
 
-      tempString = bc_node.child_value("bc_down");
-      if (tempString == "REFLECT")
-        bc[Y_NEG] = REFLECT;
-      else if (tempString == "VACUUM")
-        bc[Y_NEG] = VACUUM;
-      else
-        b_error = true;
+          if (name_string == "material") {
+            id = it->child("ID").text().as_int();
+            chord_start = it->child("chord_start").text().as_double();
+            chord_end = it->child("chord_end").text().as_double();
+            opacA = it->child("opacA").text().as_double();
+            opacB = it->child("opacB").text().as_double();
+            opacC = it->child("opacC").text().as_double();
+            opacS = it->child("opacS").text().as_double();
+            temp_e = it->child("initial_T_e").text().as_double();
+            temp_r = it->child("initial_T_r").text().as_double();
+            dens = it->child("density").text().as_double();
+            spec_heat = it->child("CV").text().as_double();
+            mat_id.push_back(id);
+            mat_chord_start.push_back(chord_start);
+            mat_chord_end.push_back(chord_end);
+            mat_opacA.push_back(opacA);
+            mat_opacB.push_back(opacB);
+            mat_opacC.push_back(opacC);
+            mat_opacS.push_back(opacS);
+            mat_T_e.push_back(temp_e);
+            mat_T_r.push_back(temp_r);
+            mat_dens.push_back(dens);
+            mat_CV.push_back(spec_heat);
+          }
+        }
 
-      tempString = bc_node.child_value("bc_top");
-      if (tempString == "REFLECT")
-        bc[Z_POS] = REFLECT;
-      else if (tempString == "VACUUM")
-        bc[Z_POS] = VACUUM;
-      else
-        b_error = true;
+        if ((mat_id.size() != 2) || (mat_id.size() != num_materials)) {
+          cout << "Unsupported/inconsistent number of materials; please use a binary system" << endl;
+          exit(EXIT_FAILURE);
+        }
 
-      tempString = bc_node.child_value("bc_bottom");
-      if (tempString == "REFLECT")
-        bc[Z_NEG] = REFLECT;
-      else if (tempString == "VACUUM")
-        bc[Z_NEG] = VACUUM;
-      else
-        b_error = true;
+        // Establish regions from material data
+        for (int i = 0; i < num_materials; i++) {
+          Region random_region;
+          random_region.set_ID(mat_id.at(i));
+          random_region.set_cV(mat_CV.at(i));
+          random_region.set_rho(mat_dens.at(i));
+          random_region.set_opac_A(mat_opacA.at(i));
+          random_region.set_opac_B(mat_opacB.at(i));
+          random_region.set_opac_C(mat_opacC.at(i));
+          random_region.set_opac_S(mat_opacS.at(i));
+          random_region.set_T_e(mat_T_e.at(i));
+          random_region.set_T_r(mat_T_r.at(i));
+          // map user defined ID to index in region vector
+          region_ID_to_index[random_region.get_ID()] = regions.size();
+          // add to list of regions
+          regions.push_back(random_region);
+        }
 
-      if (b_error) {
-        cout << "ERROR: Boundary type not reconginzed. Exiting..." << endl;
-        exit(EXIT_FAILURE);
+        // random geometry seed
+        seed_g_rng(geometry_seed);
+
+        generate_geometry_constant();
+      } else {
+        random_problem = false;
+        num_realizations = 0;
+        num_materials = 0;
+        column_size = 0.0;
+        problem_dist = 0.0;
+        sublayer_cells = 0;
       }
-      // end boundary node
+
+      if (!random_problem) {
+        // read in boundary conditions
+        bool b_error = false;
+        tempString = bc_node.child_value("bc_right");
+        if (tempString == "REFLECT")
+          bc[X_POS] = REFLECT;
+        else if (tempString == "VACUUM")
+          bc[X_POS] = VACUUM;
+        else
+          b_error = true;
+
+        tempString = bc_node.child_value("bc_left");
+        if (tempString == "REFLECT")
+          bc[X_NEG] = REFLECT;
+        else if (tempString == "VACUUM")
+          bc[X_NEG] = VACUUM;
+        else
+          b_error = true;
+
+        tempString = bc_node.child_value("bc_up");
+        if (tempString == "REFLECT")
+          bc[Y_POS] = REFLECT;
+        else if (tempString == "VACUUM")
+          bc[Y_POS] = VACUUM;
+        else
+          b_error = true;
+
+        tempString = bc_node.child_value("bc_down");
+        if (tempString == "REFLECT")
+          bc[Y_NEG] = REFLECT;
+        else if (tempString == "VACUUM")
+          bc[Y_NEG] = VACUUM;
+        else
+          b_error = true;
+
+        tempString = bc_node.child_value("bc_top");
+        if (tempString == "REFLECT")
+          bc[Z_POS] = REFLECT;
+        else if (tempString == "VACUUM")
+          bc[Z_POS] = VACUUM;
+        else
+          b_error = true;
+
+        tempString = bc_node.child_value("bc_bottom");
+        if (tempString == "REFLECT")
+          bc[Z_NEG] = REFLECT;
+        else if (tempString == "VACUUM")
+          bc[Z_NEG] = VACUUM;
+        else
+          b_error = true;
+
+        if (b_error) {
+          cout << "ERROR: Boundary type not recognized. Exiting..." << endl;
+          exit(EXIT_FAILURE);
+        }
+      } else {
+        bc[X_POS] = VACUUM;
+        bc[X_NEG] = VACUUM;
+        bc[Y_POS] = REFLECT;
+        bc[Y_NEG] = REFLECT;
+        bc[Z_POS] = REFLECT;
+        bc[Z_NEG] = REFLECT;
+      } // end boundary node
 
       // read in region data
-      for (pugi::xml_node_iterator it = region_node.begin();
-           it != region_node.end(); ++it) {
-        std::string name_string = it->name();
-        if (name_string == "region") {
-          Region temp_region;
-          temp_region.set_ID(it->child("ID").text().as_int());
-          temp_region.set_cV(it->child("CV").text().as_double());
-          temp_region.set_rho(it->child("density").text().as_double());
-          temp_region.set_opac_A(it->child("opacA").text().as_double());
-          temp_region.set_opac_B(it->child("opacB").text().as_double());
-          temp_region.set_opac_C(it->child("opacC").text().as_double());
-          temp_region.set_opac_S(it->child("opacS").text().as_double());
-          temp_region.set_T_e(it->child("initial_T_e").text().as_double());
-          // default T_r to T_e if not specified
-          temp_region.set_T_r(it->child("initial_T_r").text().as_double());
-          // map user defined ID to index in region vector
-          region_ID_to_index[temp_region.get_ID()] = regions.size();
-          // add to list of regions
-          regions.push_back(temp_region);
+      if (!random_problem) {
+        for (pugi::xml_node_iterator it = region_node.begin();
+            it != region_node.end(); ++it) {
+          std::string name_string = it->name();
+          if (name_string == "region") {
+            Region temp_region;
+            temp_region.set_ID(it->child("ID").text().as_int());
+            temp_region.set_cV(it->child("CV").text().as_double());
+            temp_region.set_rho(it->child("density").text().as_double());
+            temp_region.set_opac_A(it->child("opacA").text().as_double());
+            temp_region.set_opac_B(it->child("opacB").text().as_double());
+            temp_region.set_opac_C(it->child("opacC").text().as_double());
+            temp_region.set_opac_S(it->child("opacS").text().as_double());
+            temp_region.set_T_e(it->child("initial_T_e").text().as_double());
+            // default T_r to T_e if not specified
+            temp_region.set_T_r(it->child("initial_T_r").text().as_double());
+            // map user defined ID to index in region vector
+            region_ID_to_index[temp_region.get_ID()] = regions.size();
+            // add to list of regions
+            regions.push_back(temp_region);
+          }
         }
       }
 
-      // set total number of divisions
-      n_divisions = nx_divisions * ny_divisions * nz_divisions;
+      if (!random_problem) {
+        division_set(nx_divisions, ny_divisions, nz_divisions);
 
-      // get global cell counts
-      n_global_x_cells = std::accumulate(n_x_cells.begin(), n_x_cells.end(), 0);
-      n_global_y_cells = std::accumulate(n_y_cells.begin(), n_y_cells.end(), 0);
-      n_global_z_cells = std::accumulate(n_z_cells.begin(), n_z_cells.end(), 0);
-
-      // make sure at least one region is specified
-      if (!regions.size()) {
-        cout << "ERROR: No regions were specified. Exiting..." << endl;
-        exit(EXIT_FAILURE);
+        // append the last point values and allocate SILO array
+        x.push_back(x_end.back());
+        y.push_back(y_end.back());
+        z.push_back(z_end.back());
+        silo_x = std::vector<float>(x.size());
+        silo_y = std::vector<float>(y.size());
+        silo_z = std::vector<float>(z.size());
+        for (uint32_t i = 0; i < x.size(); ++i)
+          silo_x[i] = x[i];
+        for (uint32_t j = 0; j < y.size(); ++j)
+          silo_y[j] = y[j];
+        for (uint32_t k = 0; k < z.size(); ++k)
+          silo_z[k] = z[k];
       }
-
-      // the total number of divisions  must equal the number of unique region maps
-      if (n_divisions != region_map.size()) {
-        cout << "ERROR: Number of total divisions must match the number of ";
-        cout << "unique region maps. Exiting..." << endl;
-        exit(EXIT_FAILURE);
-      }
-
-      // append the last point values and allocate SILO array
-      x.push_back(x_end.back());
-      y.push_back(y_end.back());
-      z.push_back(z_end.back());
-      silo_x = std::vector<float>(x.size());
-      silo_y = std::vector<float>(y.size());
-      silo_z = std::vector<float>(z.size());
-      for (uint32_t i = 0; i < x.size(); ++i)
-        silo_x[i] = x[i];
-      for (uint32_t j = 0; j < y.size(); ++j)
-        silo_y[j] = y[j];
-      for (uint32_t k = 0; k < z.size(); ++k)
-        silo_z[k] = z[k];
     } // end xml parse
 
     const int n_bools = 6;
@@ -557,7 +642,7 @@ public:
   }
 
   //! Destructor
-  ~Input(){};
+  ~Input(){ delete g_rng; }
 
   //! Print the information read from the input file
   void print_problem_info(void) const {
@@ -603,7 +688,9 @@ public:
       cout << "SILO output disabled (default)" << endl;
 #else
     if (write_silo)
-      cout << "NOTE: SILO libraries not linked... no visualization" << endl;
+      cout << "NOTE: SILO libraries not linked... will attempt HDF5" << endl;
+    else
+      cout << "No visualization set" << endl;
 #endif
     cout << "Spatial Information -- cells x,y,z: " << n_global_x_cells << " ";
     cout << n_global_y_cells << " " << n_global_z_cells << endl;
@@ -623,6 +710,124 @@ public:
     cout << endl;
 
     cout << endl;
+  }
+
+  void generate_geometry(void) {
+    if (chord_model == "constant") {
+      generate_geometry_constant();
+    }
+  }
+
+  void generate_geometry_constant(void) {
+    // clear other/previous geometry data
+    x_start.clear();
+    x_end.clear();
+    y_start.clear();
+    y_end.clear();
+    z_start.clear();
+    z_end.clear();
+    n_x_cells.clear();
+    n_y_cells.clear();
+    n_z_cells.clear();
+    silo_x.clear();
+    silo_y.clear();
+    silo_z.clear();
+    region_map.clear();
+
+    uint32_t nx_divisions = 0;
+    uint32_t ny_divisions = 1;
+    uint32_t nz_divisions = 1;
+
+    uint32_t x_key, y_key, z_key, key, region_ID;
+
+    std::vector<float> x, y, z;
+
+    double cur_dist;
+
+    // push back the master x points for silo
+    double rand_num = g_rng->generate_random_number();
+    double cons_dist = 0.0, dist = 0.0, prob_0, chord;
+    int material_num;
+
+    material_num = (rand_num < mat_chord_start.at(0) / (mat_chord_start.at(0) + mat_chord_start.at(1))) ? 0 : 1;
+
+    y.push_back(0.0);
+    z.push_back(0.0);
+
+    while (cons_dist < problem_dist) {
+      x_start.push_back(cons_dist);
+      // Generate a random number
+      rand_num = g_rng->generate_random_number();
+      chord = mat_chord_start.at(material_num);
+      dist -= log(rand_num) * chord;
+      cons_dist += dist;
+      // Check on thickness to not overshoot the boundary
+      if (cons_dist > problem_dist) {
+        dist += problem_dist - cons_dist;
+        cons_dist = problem_dist;
+      }
+      // Further discretize geometry
+      for (uint32_t i = 0; i < sublayer_cells; i++) {
+        cur_dist = cons_dist - dist + (dist / (double)sublayer_cells * (double)i);
+        if (cur_dist != problem_dist)
+          x.push_back(cur_dist);
+      }
+      x_end.push_back(cons_dist);
+      n_x_cells.push_back(sublayer_cells);
+
+      x_key = nx_divisions;
+      y_key = 0;
+      z_key = 0;
+      key = z_key * 1000000 + y_key * 1000 + x_key;
+      region_map[key] = material_num;
+      nx_divisions++;
+      material_num = (material_num == 0) ? 1 : 0;
+    }
+
+    x.push_back(problem_dist);
+    y_start.push_back(0.0);
+    y_end.push_back(column_size);
+    n_y_cells.push_back(1);
+    z_start.push_back(0.0);
+    z_end.push_back(column_size);
+    n_z_cells.push_back(1);
+
+    division_set(nx_divisions, ny_divisions, nz_divisions);
+
+    x.push_back(x_end.back());
+    y.push_back(y_end.back());
+    z.push_back(z_end.back());
+    silo_x = std::vector<float>(x.size());
+    silo_y = std::vector<float>(y.size());
+    silo_z = std::vector<float>(z.size());
+    for (uint32_t i = 0; i < x.size(); ++i)
+      silo_x[i] = x[i];
+    for (uint32_t j = 0; j < y.size(); ++j)
+      silo_y[j] = y[j];
+    for (uint32_t k = 0; k < z.size(); ++k)
+      silo_z[k] = z[k];
+  }
+
+  void division_set(uint32_t nx_divisions, uint32_t ny_divisions, uint32_t nz_divisions) {
+    n_divisions = nx_divisions * ny_divisions * nz_divisions;
+
+    // get global cell counts
+    n_global_x_cells = std::accumulate(n_x_cells.begin(), n_x_cells.end(), 0);
+    n_global_y_cells = std::accumulate(n_y_cells.begin(), n_y_cells.end(), 0);
+    n_global_z_cells = std::accumulate(n_z_cells.begin(), n_z_cells.end(), 0);
+
+    // make sure at least one region is specified
+    if (!regions.size()) {
+      std::cout << "ERROR: No regions were specified. Exiting..." << std::endl;
+      exit(EXIT_FAILURE);
+    }
+
+    // the total number of divisions must equal the number of unique region maps
+    if (n_divisions != region_map.size()) {
+      std::cout << "ERROR: Number of total divisions must match the number of ";
+      std::cout << "unique region maps. Exiting..." << std::endl;
+      exit(EXIT_FAILURE);
+    }
   }
 
   //! Return the number of global cells in the x direction
@@ -739,9 +944,35 @@ public:
     return bc[direction];
   }
 
+  int get_structured_cells(void) const { return structured_cells; }
+
+  bool get_random_problem(void) const { return random_problem; }
+
+  int get_num_realizations(void) const { return num_realizations; }
+
+  int get_realization_print(void) const {return realization_print; }
+
+  int get_num_materials(void) const { return num_materials; }
+
+  double get_problem_dist(void) const { return problem_dist; }
+
 private:
+  // generator for random geometry profiles
+  RNG *g_rng = new RNG();
+  void seed_g_rng(int geometry_seed) { g_rng->set_seed(geometry_seed); }
+
+  // random geometry data
+  int num_realizations, realization_print;
+  int num_materials;
+  double column_size, problem_dist;
+  int sublayer_cells, structured_cells;
+  std::string chord_model;
+  std::vector<int> mat_id;
+  std::vector<double> mat_chord_start, mat_chord_end, mat_opacA, mat_opacB, mat_opacC, mat_opacS, mat_T_e, mat_T_r, mat_dens, mat_CV;
+
   // flags
   bool write_silo; //!< Dump SILO output files
+  bool random_problem; //!< Makes use of random spatial region
 
   Constants::bc_type bc[6]; //!< Boundary condition array
 

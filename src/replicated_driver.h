@@ -26,10 +26,12 @@
 #include "replicated_transport.h"
 #include "timer.h"
 #include "write_silo.h"
+#include "write_hdf5.h"
+#include "time_overlay.h"
 
 void imc_replicated_driver(Mesh &mesh, IMC_State &imc_state,
                            const IMC_Parameters &imc_parameters,
-                           const MPI_Types &mpi_types, const Info &mpi_info) {
+                           const MPI_Types &mpi_types, const Info &mpi_info, const bool write_output, const bool random_problem, Time_Overlay &overlays) {
   using std::vector;
   vector<double> abs_E(mesh.get_global_num_cells(), 0.0);
   vector<double> track_E(mesh.get_global_num_cells(), 0.0);
@@ -43,15 +45,19 @@ void imc_replicated_driver(Mesh &mesh, IMC_State &imc_state,
   uint64_t max_census_size =
       static_cast<uint64_t>(1.1 * imc_parameters.get_n_user_photon());
 
-  if (imc_parameters.get_write_silo_flag()) {
+  /*
+  if (imc_parameters.get_write_silo_flag() && write_output) {
     // write SILO file
     write_silo(mesh, imc_state.get_time(), imc_state.get_step(),
                imc_state.get_rank_transport_runtime(), fake_mpi_runtime, rank,
                mpi_info.get_n_rank());
+    // else write HDF5 file
+    write_hdf5(mesh, imc_state.get_time(), imc_state.get_step(), imc_state.get_rank_transport_runtime(), fake_mpi_runtime, rank, mpi_info.get_n_rank());
   }
+  */
 
   while (!imc_state.finished()) {
-    if (rank == 0)
+    if (write_output && rank == 0)
       imc_state.print_timestep_header();
 
     // set opacity, Fleck factor, all energy to source
@@ -93,14 +99,21 @@ void imc_replicated_driver(Mesh &mesh, IMC_State &imc_state,
       imc_state.set_post_mat_E(0.0);
     }
 
-    imc_state.print_conservation();
+    if (write_output) {
+      imc_state.print_conservation();
 
-    if (imc_parameters.get_write_silo_flag() &&
-        !(imc_state.get_step() % imc_parameters.get_output_frequency())) {
-      // write SILO file
-      write_silo(mesh, imc_state.get_time(), imc_state.get_step(),
-                 imc_state.get_rank_transport_runtime(), fake_mpi_runtime, rank,
-                 mpi_info.get_n_rank());
+      if (imc_parameters.get_write_silo_flag() && !(imc_state.get_step() % imc_parameters.get_output_frequency())) {
+        // write SILO file
+        write_silo(mesh, imc_state.get_time(), imc_state.get_step(),
+                   imc_state.get_rank_transport_runtime(), fake_mpi_runtime, rank,
+                   mpi_info.get_n_rank());
+        // else write HDF5 file
+        write_hdf5(mesh, imc_state.get_time(), imc_state.get_step(), imc_state.get_rank_transport_runtime(), fake_mpi_runtime, rank, mpi_info.get_n_rank());
+      }
+    }
+
+    if (random_problem) {
+      overlays.set(mesh, imc_state.get_step(), rank, mpi_info.get_n_rank());
     }
 
     // update time for next step
