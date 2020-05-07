@@ -55,9 +55,9 @@ public:
     using Constants::Z_POS;
     using std::cout;
     using std::endl;
-    using std::vector;
 
     // root rank reads file, prints warnings, and broadcasts to others
+    MPI_Region = mpi_types.get_region_type();
     int rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     if (rank == 0) {
@@ -68,9 +68,9 @@ public:
       uint32_t nz_divisions = 0;
       uint32_t region_ID;
 
-      vector<float> x;
-      vector<float> y;
-      vector<float> z;
+      std::vector<float> x;
+      std::vector<float> y;
+      std::vector<float> z;
 
       pugi::xml_document doc;
       pugi::xml_parse_result load_result = doc.load_file(fileName.c_str());
@@ -364,10 +364,12 @@ public:
       } else {
         random_problem = false;
         num_realizations = 0;
+        realization_print = 0;
         num_materials = 0;
         column_size = 0.0;
         problem_dist = 0.0;
         sublayer_cells = 0;
+        structured_cells = 0;
       }
 
       if (!random_problem) {
@@ -476,12 +478,23 @@ public:
         for (uint32_t k = 0; k < z.size(); ++k)
           silo_z[k] = z[k];
       }
-    } // end xml parse
+    } // end xml parse on root rank
 
-    const int n_bools = 6;
-    const int n_uint = 10;
-    const int n_doubles = 6;
-    MPI_Datatype MPI_Region = mpi_types.get_region_type();
+    broadcast();
+  }
+
+  //! Destructor
+  ~Input(){ delete g_rng; }
+
+  void broadcast() {
+    using std::vector;
+
+    int rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    const int n_bools = 7;
+    const int n_uint = 13;
+    const int n_uint64 = 3;
+    const int n_doubles = 8;
 
     // root rank broadcasts read values
     if (rank == 0) {
@@ -493,7 +506,7 @@ public:
 
       // bools
       vector<int> all_bools = {write_silo, use_tilt,      use_comb,
-                               use_strat,  print_verbose, print_mesh_info};
+                               use_strat,  print_verbose, print_mesh_info, random_problem};
       MPI_Bcast(&all_bools[0], n_bools, MPI_INT, 0, MPI_COMM_WORLD);
 
       // bcs
@@ -510,15 +523,21 @@ public:
                                    n_regions,
                                    n_x_div,
                                    n_y_div,
-                                   n_z_div};
+                                   n_z_div,
+                                   num_materials,
+                                   sublayer_cells,
+                                   structured_cells};
       MPI_Bcast(&all_uint[0], n_uint, MPI_UNSIGNED, 0, MPI_COMM_WORLD);
 
       // uint64
-      MPI_Bcast(&n_photons, 1, MPI_UNSIGNED_LONG, 0, MPI_COMM_WORLD);
+      vector<uint64_t> all_uint64 = {n_photons,
+                                     num_realizations,
+                                     realization_print};
+      MPI_Bcast(&all_uint64[0], n_uint64, MPI_UNSIGNED_LONG, 0, MPI_COMM_WORLD);
 
       // double
-      vector<double> all_doubles = {tStart, dt,    tFinish,
-                                    tMult,  dtMax, T_source};
+      vector<double> all_doubles = {tStart, dt, tFinish,
+                                    tMult, dtMax, T_source, column_size, problem_dist};
       MPI_Bcast(&all_doubles[0], n_doubles, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
       // region processing
@@ -551,7 +570,7 @@ public:
 
     } else {
       // set bools
-      vector<int> all_bools(8);
+      vector<int> all_bools(7);
 
       MPI_Bcast(&all_bools[0], n_bools, MPI_INT, 0, MPI_COMM_WORLD);
       write_silo = all_bools[0];
@@ -560,6 +579,7 @@ public:
       use_strat = all_bools[3];
       print_verbose = all_bools[4];
       print_mesh_info = all_bools[5];
+      random_problem = all_bools[6];
 
       // set bcs
       vector<int> bcast_bcs(6);
@@ -576,13 +596,20 @@ public:
       n_global_x_cells = all_uint[3];
       n_global_y_cells = all_uint[4];
       n_global_z_cells = all_uint[5];
-      const uint32_t n_regions = all_uint[6];
-      const uint32_t n_x_div = all_uint[7];
-      const uint32_t n_y_div = all_uint[8];
-      const uint32_t n_z_div = all_uint[9];
+      uint32_t n_regions = all_uint[6];
+      uint32_t n_x_div = all_uint[7];
+      uint32_t n_y_div = all_uint[8];
+      uint32_t n_z_div = all_uint[9];
+      num_materials = all_uint[10];
+      sublayer_cells = all_uint[11];
+      structured_cells = all_uint[12];
 
       // uint64
-      MPI_Bcast(&n_photons, 1, MPI_UNSIGNED_LONG, 0, MPI_COMM_WORLD);
+      vector<uint64_t> all_uint64(n_uint64);
+      MPI_Bcast(&all_uint64[0], n_uint64, MPI_UNSIGNED_LONG, 0, MPI_COMM_WORLD);
+      n_photons = all_uint64[0];
+      num_realizations = all_uint64[1];
+      realization_print = all_uint64[2];
 
       vector<double> all_doubles(n_doubles);
       MPI_Bcast(&all_doubles[0], n_doubles, MPI_DOUBLE, 0, MPI_COMM_WORLD);
@@ -592,6 +619,8 @@ public:
       tMult = all_doubles[3];
       dtMax = all_doubles[4];
       T_source = all_doubles[5];
+      column_size = all_doubles[6];
+      problem_dist = all_doubles[7];
 
       // region processing (broadcast directly into member variable)
       regions.resize(n_regions);
@@ -640,9 +669,6 @@ public:
 
     MPI_Barrier(MPI_COMM_WORLD);
   }
-
-  //! Destructor
-  ~Input(){ delete g_rng; }
 
   //! Print the information read from the input file
   void print_problem_info(void) const {
@@ -713,9 +739,15 @@ public:
   }
 
   void generate_geometry(void) {
-    if (chord_model == "constant") {
-      generate_geometry_constant();
+    int rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    if (rank == 0) {
+      if (chord_model == "constant") {
+        generate_geometry_constant();
+      }
     }
+
+    broadcast();
   }
 
   void generate_geometry_constant(void) {
@@ -944,28 +976,29 @@ public:
     return bc[direction];
   }
 
-  int get_structured_cells(void) const { return structured_cells; }
+  uint32_t get_structured_cells(void) const { return structured_cells; }
 
   bool get_random_problem(void) const { return random_problem; }
 
-  int get_num_realizations(void) const { return num_realizations; }
+  uint64_t get_num_realizations(void) const { return num_realizations; }
 
-  int get_realization_print(void) const {return realization_print; }
+  uint64_t get_realization_print(void) const {return realization_print; }
 
-  int get_num_materials(void) const { return num_materials; }
+  uint32_t get_num_materials(void) const { return num_materials; }
 
   double get_problem_dist(void) const { return problem_dist; }
 
 private:
+  MPI_Datatype MPI_Region;
   // generator for random geometry profiles
   RNG *g_rng = new RNG();
   void seed_g_rng(int geometry_seed) { g_rng->set_seed(geometry_seed); }
 
   // random geometry data
-  int num_realizations, realization_print;
-  int num_materials;
+  uint64_t num_realizations, realization_print;
+  uint32_t num_materials;
   double column_size, problem_dist;
-  int sublayer_cells, structured_cells;
+  uint32_t sublayer_cells, structured_cells;
   std::string chord_model;
   std::vector<int> mat_id;
   std::vector<double> mat_chord_start, mat_chord_end, mat_opacA, mat_opacB, mat_opacC, mat_opacS, mat_T_e, mat_T_r, mat_dens, mat_CV;

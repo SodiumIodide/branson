@@ -66,11 +66,13 @@ int main(int argc, char **argv) {
     // get input object from filename
     std::string filename(argv[1]);
     Input input(filename, mpi_types);
+    MPI_Barrier(MPI_COMM_WORLD);
     int num_realizations, realization_print; // used for random problem
     bool random_problem = input.get_random_problem();
     bool write_output;
     if (random_problem) {
-      cout << "DETECTED RANDOM PROBLEM" << endl << endl;
+      if (mpi_info.get_rank() == 0)
+        cout << "DETECTED RANDOM PROBLEM" << endl << endl;
       num_realizations = input.get_num_realizations();
       realization_print = input.get_realization_print();
       write_output = false;
@@ -125,8 +127,9 @@ int main(int argc, char **argv) {
 
       if (random_problem) {
         MPI_Barrier(MPI_COMM_WORLD);
-        if ((i + 1) % realization_print == 0) {
-          cout << "Realization number " << (i + 1) << endl;
+        if (mpi_info.get_rank() == 0) {
+          if ((i + 1) % realization_print == 0)
+            cout << "Realization number " << (i + 1) << endl;
         }
       }
 
