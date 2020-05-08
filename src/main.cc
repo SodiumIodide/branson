@@ -89,6 +89,7 @@ int main(int argc, char **argv) {
     // Overlay structure for random problems
     Time_Overlay time_overlay(input);
 
+    MPI_Barrier(MPI_COMM_WORLD);
     for (int i = 0; i < num_realizations; i++) {
       if (random_problem) {
         // re-generate geometry

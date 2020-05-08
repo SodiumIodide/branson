@@ -330,6 +330,7 @@ public:
             mat_chord_start.push_back(chord_start);
             mat_chord_end.push_back(chord_end);
             mat_quad_minmax.push_back(quad_minmax);
+            mat_quad_mult.push_back(quad_mult);
             mat_opacA.push_back(opacA);
             mat_opacB.push_back(opacB);
             mat_opacC.push_back(opacC);
@@ -367,8 +368,8 @@ public:
         // random geometry seed
         seed_g_rng(geometry_seed);
 
-        // placeholder initial geometry - program will re-generate at start of every realization in a random problem
-        generate_geometry();
+        // placeholder initial geometry - geometry is re-generated each realization
+        generate_geometry_internal();
       } else {
         random_problem = false;
         num_realizations = 0;
@@ -490,6 +491,7 @@ public:
     } // end xml parse on root rank
 
     broadcast();
+    MPI_Barrier(MPI_COMM_WORLD);
   }
 
   //! Destructor
@@ -500,6 +502,7 @@ public:
 
     int rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
     const int n_bools = 7;
     const int n_uint = 13;
     const int n_uint64 = 3;
@@ -576,10 +579,9 @@ public:
       MPI_Bcast(&z_start[0], n_z_div, MPI_DOUBLE, 0, MPI_COMM_WORLD);
       MPI_Bcast(&z_end[0], n_z_div, MPI_DOUBLE, 0, MPI_COMM_WORLD);
       MPI_Bcast(&n_z_cells[0], n_z_div, MPI_UNSIGNED, 0, MPI_COMM_WORLD);
-
     } else {
       // set bools
-      vector<int> all_bools(7);
+      vector<int> all_bools(n_bools);
 
       MPI_Bcast(&all_bools[0], n_bools, MPI_INT, 0, MPI_COMM_WORLD);
       write_silo = all_bools[0];
@@ -595,6 +597,7 @@ public:
       MPI_Bcast(&bcast_bcs[0], 6, MPI_INT, 0, MPI_COMM_WORLD);
       for (int i = 0; i < 6; ++i)
         bc[i] = Constants::bc_type(bcast_bcs[i]);
+
 
       // set uints
       vector<uint32_t> all_uint(n_uint);
@@ -675,8 +678,6 @@ public:
       silo_y = std::vector<float>(n_global_y_cells, 0.0);
       silo_z = std::vector<float>(n_global_z_cells, 0.0);
     }
-
-    MPI_Barrier(MPI_COMM_WORLD);
   }
 
   //! Print the information read from the input file
@@ -748,48 +749,49 @@ public:
   }
 
   void generate_geometry(void) {
+    int rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    if (rank == 0) {
+      generate_geometry_internal();
+    }
+
+    broadcast();
+    MPI_Barrier(MPI_COMM_WORLD);
+  }
+
+  void generate_geometry_internal(void) {
     using std::cout;
     using std::endl;
 
-    int rank;
-    bool exit_call = false;
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    if (rank == 0) {
-      if (chord_model == "constant")
-        generate_geometry_constant();
-      else if (chord_model == "linear")
-        generate_geometry_linear();
-      else if (chord_model == "linear_direct")
-        generate_geometry_linear_direct();
-      else if (chord_model == "linear_piecewise")
-        generate_geometry_linear_piecewise();
-      else if (chord_model == "linear_piecewise_direct")
-        generate_geometry_linear_piecewise_direct();
-      else if (chord_model == "quadratic")
-        generate_geometry_quadratic();
-      else if (chord_model == "quadratic_piecewise")
-        generate_geometry_quadratic_piecewise();
-      else if (chord_model == "quadratic_piecewise_direct")
-        generate_geometry_quadratic_piecewise_direct();
-      else {
-        cout << "ERROR: Material chord model not recognized." << endl;
-        cout << "Options are:" << endl;
-        cout << "linear" << endl;
-        cout << "linear_direct" << endl;
-        cout << "linear_piecewise" << endl;
-        cout << "linear_piecewise_direct" << endl;
-        cout << "quadratic" << endl;
-        cout << "quadratic_piecewise" << endl;
-        cout << "quadratic_piecewise_direct" << endl;
-        cout << "\nExiting..." << endl;
-        exit_call = true;
-      }
-    }
-    MPI_Bcast(&exit_call, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    if (exit_call)
+    if (chord_model == "constant")
+      generate_geometry_constant();
+    else if (chord_model == "linear")
+      generate_geometry_linear();
+    else if (chord_model == "linear_direct")
+      generate_geometry_linear_direct();
+    else if (chord_model == "linear_piecewise")
+      generate_geometry_linear_piecewise();
+    else if (chord_model == "linear_piecewise_direct")
+      generate_geometry_linear_piecewise_direct();
+    else if (chord_model == "quadratic")
+      generate_geometry_quadratic();
+    else if (chord_model == "quadratic_piecewise")
+      generate_geometry_quadratic_piecewise();
+    else if (chord_model == "quadratic_piecewise_direct")
+      generate_geometry_quadratic_piecewise_direct();
+    else {
+      cout << "ERROR: Material chord model not recognized." << endl;
+      cout << "Options are:" << endl;
+      cout << "linear" << endl;
+      cout << "linear_direct" << endl;
+      cout << "linear_piecewise" << endl;
+      cout << "linear_piecewise_direct" << endl;
+      cout << "quadratic" << endl;
+      cout << "quadratic_piecewise" << endl;
+      cout << "quadratic_piecewise_direct" << endl;
+      cout << "\nExiting..." << endl;
       exit(EXIT_FAILURE);
-
-    broadcast();
+    }
   }
 
   void generate_geometry_constant(void) {
@@ -812,7 +814,7 @@ public:
     uint32_t ny_divisions = 1;
     uint32_t nz_divisions = 1;
 
-    uint32_t x_key, y_key, z_key, key, region_ID;
+    uint32_t x_key, y_key, z_key, key;
 
     std::vector<float> x, y, z;
 
@@ -902,7 +904,7 @@ public:
     uint32_t ny_divisions = 1;
     uint32_t nz_divisions = 1;
 
-    uint32_t x_key, y_key, z_key, key, region_ID;
+    uint32_t x_key, y_key, z_key, key;
 
     std::vector<float> x, y, z;
 
@@ -1004,7 +1006,7 @@ public:
     uint32_t ny_divisions = 1;
     uint32_t nz_divisions = 1;
 
-    uint32_t x_key, y_key, z_key, key, region_ID;
+    uint32_t x_key, y_key, z_key, key;
 
     std::vector<float> x, y, z;
 
@@ -1124,7 +1126,7 @@ public:
     uint32_t ny_divisions = 1;
     uint32_t nz_divisions = 1;
 
-    uint32_t x_key, y_key, z_key, key, region_ID;
+    uint32_t x_key, y_key, z_key, key;
 
     std::vector<float> x, y, z;
 
@@ -1257,7 +1259,7 @@ public:
     uint32_t ny_divisions = 1;
     uint32_t nz_divisions = 1;
 
-    uint32_t x_key, y_key, z_key, key, region_ID;
+    uint32_t x_key, y_key, z_key, key;
 
     std::vector<float> x, y, z;
 
@@ -1374,7 +1376,7 @@ public:
     uint32_t ny_divisions = 1;
     uint32_t nz_divisions = 1;
 
-    uint32_t x_key, y_key, z_key, key, region_ID;
+    uint32_t x_key, y_key, z_key, key;
 
     std::vector<float> x, y, z;
 
@@ -1504,7 +1506,7 @@ public:
     uint32_t ny_divisions = 1;
     uint32_t nz_divisions = 1;
 
-    uint32_t x_key, y_key, z_key, key, region_ID;
+    uint32_t x_key, y_key, z_key, key;
 
     std::vector<float> x, y, z;
 
@@ -1648,7 +1650,7 @@ public:
     uint32_t ny_divisions = 1;
     uint32_t nz_divisions = 1;
 
-    uint32_t x_key, y_key, z_key, key, region_ID;
+    uint32_t x_key, y_key, z_key, key;
 
     std::vector<float> x, y, z;
 

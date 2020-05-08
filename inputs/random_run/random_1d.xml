@@ -29,6 +29,7 @@
         <geometry_seed>1234</geometry_seed>
         <sublayer_cells>10</sublayer_cells>
         <structured_cells>100</structured_cells>
+        <piecewise_segments>100</piecewise_segments>
         <realizations>10000</realizations>
         <realization_print>1</realization_print>
     </problem>
@@ -37,6 +38,8 @@
         <ID>0</ID>
         <chord_start>0.1</chord_start>
         <chord_end>0.8</chord_end>
+        <quad>max</quad>
+        <quad_mult>2.0</quad_mult>
         <opacA>5.0</opacA>
         <opacB>0.0</opacB>
         <opacC>0.0</opacC>
@@ -51,6 +54,8 @@
         <ID>1</ID>
         <chord_start>0.5</chord_start>
         <chord_end>0.3</chord_end>
+        <quad>min</quad>
+        <quad_mult>0.5</quad_mult>
         <opacA>50.0</opacA>
         <opacB>0.0</opacB>
         <opacC>0.0</opacC>
