@@ -21,6 +21,7 @@
 #include <string>
 #include <unordered_map>
 #include <cmath>
+#include <algorithm>
 
 #include "config.h"
 #include "constants.h"
@@ -29,6 +30,7 @@
 #include "region.h"
 
 #include "RNG.h"
+#include "geometry_chord_models.h"
 
 //==============================================================================
 /*!
@@ -288,7 +290,8 @@ public:
         int geometry_seed;
         double d_x_end;
         int id;
-        double chord_start, chord_end, opacA, opacB, opacC, opacS, temp_e, temp_r, dens, spec_heat;
+        double chord_start, chord_end, quad_mult, opacA, opacB, opacC, opacS, temp_e, temp_r, dens, spec_heat;
+        std::string quad_minmax;
         random_problem = true;
 
         ny_divisions = 1;
@@ -304,6 +307,7 @@ public:
             geometry_seed = it->child("geometry_seed").text().as_int();
             sublayer_cells = it->child("sublayer_cells").text().as_int();
             structured_cells = it->child("structured_cells").text().as_int();
+            piecewise_segments = it->child("piecewise_segments").text().as_int();
             num_realizations = it->child("realizations").text().as_int();
             realization_print = it->child("realization_print").text().as_int();
           }
@@ -312,6 +316,8 @@ public:
             id = it->child("ID").text().as_int();
             chord_start = it->child("chord_start").text().as_double();
             chord_end = it->child("chord_end").text().as_double();
+            quad_minmax = it->child("quad").text().as_string();
+            quad_mult = it->child("quad_mult").text().as_double();
             opacA = it->child("opacA").text().as_double();
             opacB = it->child("opacB").text().as_double();
             opacC = it->child("opacC").text().as_double();
@@ -323,6 +329,7 @@ public:
             mat_id.push_back(id);
             mat_chord_start.push_back(chord_start);
             mat_chord_end.push_back(chord_end);
+            mat_quad_minmax.push_back(quad_minmax);
             mat_opacA.push_back(opacA);
             mat_opacB.push_back(opacB);
             mat_opacC.push_back(opacC);
@@ -360,7 +367,8 @@ public:
         // random geometry seed
         seed_g_rng(geometry_seed);
 
-        generate_geometry_constant();
+        // placeholder initial geometry - program will re-generate at start of every realization in a random problem
+        generate_geometry();
       } else {
         random_problem = false;
         num_realizations = 0;
@@ -370,6 +378,7 @@ public:
         problem_dist = 0.0;
         sublayer_cells = 0;
         structured_cells = 0;
+        piecewise_segments = 0;
       }
 
       if (!random_problem) {
@@ -739,13 +748,46 @@ public:
   }
 
   void generate_geometry(void) {
+    using std::cout;
+    using std::endl;
+
     int rank;
+    bool exit_call = false;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     if (rank == 0) {
-      if (chord_model == "constant") {
+      if (chord_model == "constant")
         generate_geometry_constant();
+      else if (chord_model == "linear")
+        generate_geometry_linear();
+      else if (chord_model == "linear_direct")
+        generate_geometry_linear_direct();
+      else if (chord_model == "linear_piecewise")
+        generate_geometry_linear_piecewise();
+      else if (chord_model == "linear_piecewise_direct")
+        generate_geometry_linear_piecewise_direct();
+      else if (chord_model == "quadratic")
+        generate_geometry_quadratic();
+      else if (chord_model == "quadratic_piecewise")
+        generate_geometry_quadratic_piecewise();
+      else if (chord_model == "quadratic_piecewise_direct")
+        generate_geometry_quadratic_piecewise_direct();
+      else {
+        cout << "ERROR: Material chord model not recognized." << endl;
+        cout << "Options are:" << endl;
+        cout << "linear" << endl;
+        cout << "linear_direct" << endl;
+        cout << "linear_piecewise" << endl;
+        cout << "linear_piecewise_direct" << endl;
+        cout << "quadratic" << endl;
+        cout << "quadratic_piecewise" << endl;
+        cout << "quadratic_piecewise_direct" << endl;
+        cout << "\nExiting..." << endl;
+        exit_call = true;
       }
     }
+    MPI_Bcast(&exit_call, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    if (exit_call)
+      exit(EXIT_FAILURE);
 
     broadcast();
   }
@@ -778,7 +820,7 @@ public:
 
     // push back the master x points for silo
     double rand_num = g_rng->generate_random_number();
-    double cons_dist = 0.0, dist = 0.0, prob_0, chord;
+    double cons_dist = 0.0, dist = 0.0, chord;
     int material_num;
 
     material_num = (rand_num < mat_chord_start.at(0) / (mat_chord_start.at(0) + mat_chord_start.at(1))) ? 0 : 1;
@@ -800,7 +842,7 @@ public:
       }
       // Further discretize geometry
       for (uint32_t i = 0; i < sublayer_cells; i++) {
-        cur_dist = cons_dist - dist + (dist / (double)sublayer_cells * (double)i);
+        cur_dist = cons_dist - dist + (dist / static_cast<double>(sublayer_cells) * static_cast<double>(i));
         if (cur_dist != problem_dist)
           x.push_back(cur_dist);
       }
@@ -811,7 +853,881 @@ public:
       y_key = 0;
       z_key = 0;
       key = z_key * 1000000 + y_key * 1000 + x_key;
-      region_map[key] = material_num;
+      region_map[key] = mat_id.at(material_num);
+      nx_divisions++;
+      material_num = (material_num == 0) ? 1 : 0;
+    }
+
+    x.push_back(problem_dist);
+    y_start.push_back(0.0);
+    y_end.push_back(column_size);
+    n_y_cells.push_back(1);
+    z_start.push_back(0.0);
+    z_end.push_back(column_size);
+    n_z_cells.push_back(1);
+
+    division_set(nx_divisions, ny_divisions, nz_divisions);
+
+    x.push_back(x_end.back());
+    y.push_back(y_end.back());
+    z.push_back(z_end.back());
+    silo_x = std::vector<float>(x.size());
+    silo_y = std::vector<float>(y.size());
+    silo_z = std::vector<float>(z.size());
+    for (uint32_t i = 0; i < x.size(); ++i)
+      silo_x[i] = x[i];
+    for (uint32_t j = 0; j < y.size(); ++j)
+      silo_y[j] = y[j];
+    for (uint32_t k = 0; k < z.size(); ++k)
+      silo_z[k] = z[k];
+  }
+
+  void generate_geometry_linear_direct(void) {
+    // clear other/previous geometry data
+    x_start.clear();
+    x_end.clear();
+    y_start.clear();
+    y_end.clear();
+    z_start.clear();
+    z_end.clear();
+    n_x_cells.clear();
+    n_y_cells.clear();
+    n_z_cells.clear();
+    silo_x.clear();
+    silo_y.clear();
+    silo_z.clear();
+    region_map.clear();
+
+    uint32_t nx_divisions = 0;
+    uint32_t ny_divisions = 1;
+    uint32_t nz_divisions = 1;
+
+    uint32_t x_key, y_key, z_key, key, region_ID;
+
+    std::vector<float> x, y, z;
+
+    double cur_dist;
+
+    // Problem parameters
+    std::vector<float> chord_slope;
+    for (int m = 0; m < num_materials; m++) {
+      chord_slope.push_back((mat_chord_end.at(m) - mat_chord_start.at(m)) / problem_dist);
+    }
+
+    // push back the master x points for silo
+    double rand_num = g_rng->generate_random_number();
+    double cons_dist = 0.0, dist = 0.0, chord_start, chord_end;
+    int material_num;
+
+    // starting material volume fraction is set by initial chord lengths
+    material_num = (rand_num < mat_chord_start.at(0) / (mat_chord_start.at(0) + mat_chord_start.at(1))) ? 0 : 1;
+
+    y.push_back(0.0);
+    z.push_back(0.0);
+
+    while (cons_dist < problem_dist) {
+      x_start.push_back(cons_dist);
+      // Generate a random number
+      rand_num = g_rng->generate_random_number();
+      chord_start = mat_chord_start.at(material_num);
+      chord_end = mat_chord_end.at(material_num);
+
+      // Calculate and append the material length
+      dist = (pow(rand_num, -chord_slope.at(material_num)) * (chord_start + chord_slope.at(material_num) * cons_dist) - chord_start - chord_slope.at(material_num) * cons_dist) / chord_slope.at(material_num);
+
+      cons_dist += dist;
+
+      // Check on thickness to not overshoot the boundary
+      if (cons_dist > problem_dist) {
+        dist += problem_dist - cons_dist;
+        cons_dist = problem_dist;
+      }
+      // Further discretize geometry
+      for (uint32_t i = 0; i < sublayer_cells; i++) {
+        cur_dist = cons_dist - dist + (dist / static_cast<double>(sublayer_cells) * static_cast<double>(i));
+        if (cur_dist != problem_dist)
+          x.push_back(cur_dist);
+      }
+      x_end.push_back(cons_dist);
+      n_x_cells.push_back(sublayer_cells);
+
+      x_key = nx_divisions;
+      y_key = 0;
+      z_key = 0;
+      key = z_key * 1000000 + y_key * 1000 + x_key;
+      region_map[key] = mat_id.at(material_num);
+      nx_divisions++;
+      material_num = (material_num == 0) ? 1 : 0;
+    }
+
+    x.push_back(problem_dist);
+    y_start.push_back(0.0);
+    y_end.push_back(column_size);
+    n_y_cells.push_back(1);
+    z_start.push_back(0.0);
+    z_end.push_back(column_size);
+    n_z_cells.push_back(1);
+
+    division_set(nx_divisions, ny_divisions, nz_divisions);
+
+    x.push_back(x_end.back());
+    y.push_back(y_end.back());
+    z.push_back(z_end.back());
+    silo_x = std::vector<float>(x.size());
+    silo_y = std::vector<float>(y.size());
+    silo_z = std::vector<float>(z.size());
+    for (uint32_t i = 0; i < x.size(); ++i)
+      silo_x[i] = x[i];
+    for (uint32_t j = 0; j < y.size(); ++j)
+      silo_y[j] = y[j];
+    for (uint32_t k = 0; k < z.size(); ++k)
+      silo_z[k] = z[k];
+  }
+
+  void generate_geometry_linear(void) {
+    // clear other/previous geometry data
+    x_start.clear();
+    x_end.clear();
+    y_start.clear();
+    y_end.clear();
+    z_start.clear();
+    z_end.clear();
+    n_x_cells.clear();
+    n_y_cells.clear();
+    n_z_cells.clear();
+    silo_x.clear();
+    silo_y.clear();
+    silo_z.clear();
+    region_map.clear();
+
+    uint32_t nx_divisions = 0;
+    uint32_t ny_divisions = 1;
+    uint32_t nz_divisions = 1;
+
+    uint32_t x_key, y_key, z_key, key, region_ID;
+
+    std::vector<float> x, y, z;
+
+    double cur_dist;
+
+    // Problem parameters
+    std::vector<double> chord_slope, limiting_value_chord;
+    for (int m = 0; m < num_materials; m++) {
+      chord_slope.push_back((mat_chord_end.at(m) - mat_chord_start.at(m)) / problem_dist);
+      if (chord_slope.at(m) > 0.0)
+        limiting_value_chord.push_back(mat_chord_start.at(m));
+      else
+        limiting_value_chord.push_back(mat_chord_end.at(m));
+    }
+
+    // push back the master x points for silo
+    double rand_num = g_rng->generate_random_number();
+    double cons_dist = 0.0, dist = 0.0, chord_start, chord_end;
+    int material_num;
+    double prob_accept, buffer_chord;
+
+    // starting material volume fraction is set by initial chord lengths
+    material_num = (rand_num < mat_chord_start.at(0) / (mat_chord_start.at(0) + mat_chord_start.at(1))) ? 0 : 1;
+
+    y.push_back(0.0);
+    z.push_back(0.0);
+
+    while (cons_dist < problem_dist) {
+      dist = 0.0;
+      x_start.push_back(cons_dist);
+      chord_start = mat_chord_start.at(material_num);
+      chord_end = mat_chord_end.at(material_num);
+
+      // Loop for rejection sampling
+      bool accepted = false;
+      while (!accepted) {
+        // Generate a random number
+        rand_num = g_rng->generate_random_number();
+
+        // Sample from a homogeneous distribution of intensity equal to maximum chord
+        dist -= limiting_value_chord.at(material_num) * log(rand_num);
+        if (dist > problem_dist) break;
+
+        // Maximum value achieved with minimum length chord
+        // Or, conversely, the inverse of the chord (therefore inverse division)
+        buffer_chord = linear_chord(chord_start, chord_slope.at(material_num), cons_dist + dist);
+        prob_accept = limiting_value_chord.at(material_num) / buffer_chord;
+
+        rand_num = g_rng->generate_random_number();
+        if (rand_num < prob_accept)
+          accepted = true;
+      }
+      cons_dist += dist;
+      // Check on thickness to not overshoot the boundary
+      if (cons_dist > problem_dist) {
+        dist += problem_dist - cons_dist;
+        cons_dist = problem_dist;
+      }
+      // Further discretize geometry
+      for (uint32_t i = 0; i < sublayer_cells; i++) {
+        cur_dist = cons_dist - dist + (dist / static_cast<double>(sublayer_cells) * static_cast<double>(i));
+        if (cur_dist != problem_dist)
+          x.push_back(cur_dist);
+      }
+      x_end.push_back(cons_dist);
+      n_x_cells.push_back(sublayer_cells);
+      x_key = nx_divisions;
+      y_key = 0;
+      z_key = 0;
+      key = z_key * 1000000 + y_key * 1000 + x_key;
+      region_map[key] = mat_id.at(material_num);
+      nx_divisions++;
+      material_num = (material_num == 0) ? 1 : 0;
+    }
+
+    x.push_back(problem_dist);
+    y_start.push_back(0.0);
+    y_end.push_back(column_size);
+    n_y_cells.push_back(1);
+    z_start.push_back(0.0);
+    z_end.push_back(column_size);
+    n_z_cells.push_back(1);
+
+    division_set(nx_divisions, ny_divisions, nz_divisions);
+
+    x.push_back(x_end.back());
+    y.push_back(y_end.back());
+    z.push_back(z_end.back());
+    silo_x = std::vector<float>(x.size());
+    silo_y = std::vector<float>(y.size());
+    silo_z = std::vector<float>(z.size());
+    for (uint32_t i = 0; i < x.size(); ++i)
+      silo_x[i] = x[i];
+    for (uint32_t j = 0; j < y.size(); ++j)
+      silo_y[j] = y[j];
+    for (uint32_t k = 0; k < z.size(); ++k)
+      silo_z[k] = z[k];
+  }
+
+  void generate_geometry_linear_piecewise_direct(void) {
+    // clear other/previous geometry data
+    x_start.clear();
+    x_end.clear();
+    y_start.clear();
+    y_end.clear();
+    z_start.clear();
+    z_end.clear();
+    n_x_cells.clear();
+    n_y_cells.clear();
+    n_z_cells.clear();
+    silo_x.clear();
+    silo_y.clear();
+    silo_z.clear();
+    region_map.clear();
+
+    uint32_t nx_divisions = 0;
+    uint32_t ny_divisions = 1;
+    uint32_t nz_divisions = 1;
+
+    uint32_t x_key, y_key, z_key, key, region_ID;
+
+    std::vector<float> x, y, z;
+
+    double cur_dist;
+
+    // push back the master x points for silo
+    double rand_num = g_rng->generate_random_number();
+    double cons_dist = 0.0, dist = 0.0, chord_start, chord_end;
+    int material_num;
+
+    // Iteration values
+    bool accepted;
+    int segment, current_segment;
+    double first_portion, middle_portion;
+
+    // Determine first material to use
+    // For piecewise constant model, initial distance is at 0.0 and so the probability is equivalent to the term ratio of the averages of the first segments
+    std::vector<double> first_value;
+    for (int m = 0; m < num_materials; m++) {
+      first_value.push_back(piecewise_constant_linear_chord(mat_chord_start.at(m), mat_chord_end.at(m), piecewise_segments, problem_dist, 0.0));
+    }
+    material_num = (rand_num < first_value.at(0) / (first_value.at(0) + first_value.at(1))) ? 0 : 1;
+
+    // Delta distance in piecewise function (required to obtain chords at each segment)
+    double delta_dist = problem_dist / static_cast<double>(piecewise_segments);
+
+    while (cons_dist < problem_dist) {
+      // Generate a random number
+      g_rng->generate_random_number();
+
+      // Assign a chord length based on material number
+      chord_start = mat_chord_start.at(material_num);
+      chord_end = mat_chord_end.at(material_num);
+
+      // Loop for sampling distance (required to test each segment of piecewise function)
+      // Note that segments are zero-indexed
+      accepted = false;
+      // Start at current segment
+      current_segment = static_cast<int>(cons_dist / delta_dist);
+      segment = current_segment;
+      while (!accepted) {
+        if (segment > current_segment) {
+          first_portion = ((current_segment + 1) * delta_dist - cons_dist) / piecewise_constant_linear_chord(chord_start, chord_end, piecewise_segments, problem_dist, cons_dist);
+          middle_portion = 0.0;
+          for (int k = current_segment + 1; k < segment; k++) {
+            middle_portion += delta_dist / piecewise_constant_linear_chord(chord_start, chord_end, piecewise_segments, problem_dist, (static_cast<double>(k) + 0.5) * delta_dist);
+          }
+          dist = segment * delta_dist - piecewise_constant_linear_chord(chord_start, chord_end, piecewise_segments, problem_dist, (static_cast<double>(segment) + 0.5) * delta_dist) * (log(rand_num) + middle_portion + first_portion) - cons_dist;
+        } else {
+          dist = -log(rand_num) * piecewise_constant_linear_chord(chord_start, chord_end, piecewise_segments, problem_dist, cons_dist);
+        }
+        if (dist > (problem_dist - cons_dist))
+          dist = problem_dist - cons_dist;
+        if ((dist + cons_dist > (segment + 1) * delta_dist) || (dist + cons_dist < segment * delta_dist)) {
+          segment++;
+        } else {
+          accepted = true;
+          // Test for negative
+          if (dist < 0.0) {
+            accepted = false;
+            dist = 0.0;
+            rand_num = g_rng->generate_random_number();
+          }
+        }
+      }
+      cons_dist += dist;
+      // Check on thickness to not overshoot the boundary
+      if (cons_dist > problem_dist) {
+        dist += problem_dist - cons_dist;
+        cons_dist = problem_dist;
+      }
+      // Further discretize geometry
+      for (uint32_t i = 0; i < sublayer_cells; i++) {
+        cur_dist = cons_dist - dist + (dist / static_cast<double>(sublayer_cells) * static_cast<double>(i));
+        if (cur_dist != problem_dist)
+          x.push_back(cur_dist);
+      }
+      x_end.push_back(cons_dist);
+      n_x_cells.push_back(sublayer_cells);
+      x_key = nx_divisions;
+      y_key = 0;
+      z_key = 0;
+      key = z_key * 1000000 + y_key * 1000 + x_key;
+      region_map[key] = mat_id.at(material_num);
+      nx_divisions++;
+      material_num = (material_num == 0) ? 1 : 0;
+    }
+
+    x.push_back(problem_dist);
+    y_start.push_back(0.0);
+    y_end.push_back(column_size);
+    n_y_cells.push_back(1);
+    z_start.push_back(0.0);
+    z_end.push_back(column_size);
+    n_z_cells.push_back(1);
+
+    division_set(nx_divisions, ny_divisions, nz_divisions);
+
+    x.push_back(x_end.back());
+    y.push_back(y_end.back());
+    z.push_back(z_end.back());
+    silo_x = std::vector<float>(x.size());
+    silo_y = std::vector<float>(y.size());
+    silo_z = std::vector<float>(z.size());
+    for (uint32_t i = 0; i < x.size(); ++i)
+      silo_x[i] = x[i];
+    for (uint32_t j = 0; j < y.size(); ++j)
+      silo_y[j] = y[j];
+    for (uint32_t k = 0; k < z.size(); ++k)
+      silo_z[k] = z[k];
+  }
+
+  void generate_geometry_linear_piecewise(void) {
+    // clear other/previous geometry data
+    x_start.clear();
+    x_end.clear();
+    y_start.clear();
+    y_end.clear();
+    z_start.clear();
+    z_end.clear();
+    n_x_cells.clear();
+    n_y_cells.clear();
+    n_z_cells.clear();
+    silo_x.clear();
+    silo_y.clear();
+    silo_z.clear();
+    region_map.clear();
+
+    uint32_t nx_divisions = 0;
+    uint32_t ny_divisions = 1;
+    uint32_t nz_divisions = 1;
+
+    uint32_t x_key, y_key, z_key, key, region_ID;
+
+    std::vector<float> x, y, z;
+
+    double cur_dist;
+
+    // The value that the chord possesses for the maximum value computed (for rejection purposes)
+    // As exponential distribution is computed using the inverse of the chrod-length, the minimum value is chosen
+    std::vector<double> first_value, end_value, limiting_value_chord;
+    for (int m = 0; m < num_materials; m++) {
+      first_value.push_back(piecewise_constant_linear_chord(mat_chord_start.at(m), mat_chord_end.at(m), piecewise_segments, problem_dist, 0.0));
+      end_value.push_back(piecewise_constant_linear_chord(mat_chord_start.at(m), mat_chord_end.at(m), piecewise_segments, problem_dist, problem_dist));
+      limiting_value_chord.push_back(std::min(first_value.at(m), end_value.at(m)));
+    }
+
+    // push back the master x points for silo
+    double rand_num = g_rng->generate_random_number();
+    double cons_dist = 0.0, dist = 0.0, chord_start, chord_end;
+    int material_num;
+    double prob_accept, buffer_chord;
+
+    // Determine first material to use
+    // For piecewise constant model, initial distance is at 0.0 and so the probability is equivalent to the term ratio of the averages of the first segments
+    material_num = (rand_num < first_value.at(0) / (first_value.at(0) + first_value.at(1))) ? 0 : 1;
+
+    while (cons_dist < problem_dist) {
+      dist = 0.0;
+      // Assign a chord length based on material number
+      chord_start = mat_chord_start.at(material_num);
+      chord_end = mat_chord_end.at(material_num);
+
+      // Loop for rejection sampling
+      bool accepted = false;
+      while (!accepted) {
+        // Generate a random number
+        rand_num = g_rng->generate_random_number();
+
+        // Sample from a homogeneous distribution of intensity equal to maximum chord
+        dist -= limiting_value_chord.at(material_num) * log(rand_num);
+        if (dist > problem_dist) break;
+
+        // Maximum value achieved with minimum length chord
+        // Or, conversely, the inverse of the chord (therefore inverse division)
+        buffer_chord = piecewise_constant_linear_chord(chord_start, chord_end, piecewise_segments, problem_dist, cons_dist + dist);
+        prob_accept = limiting_value_chord.at(material_num) / buffer_chord;
+
+        rand_num = g_rng->generate_random_number();
+        if (rand_num < prob_accept)
+          accepted = true;
+      }
+      cons_dist += dist;
+      // Check on thickness to not overshoot the boundary
+      if (cons_dist > problem_dist) {
+        dist += problem_dist - cons_dist;
+        cons_dist = problem_dist;
+      }
+      // Further discretize geometry
+      for (uint32_t i = 0; i < sublayer_cells; i++) {
+        cur_dist = cons_dist - dist + (dist / static_cast<double>(sublayer_cells) * static_cast<double>(i));
+        if (cur_dist != problem_dist)
+          x.push_back(cur_dist);
+      }
+      x_end.push_back(cons_dist);
+      n_x_cells.push_back(sublayer_cells);
+      x_key = nx_divisions;
+      y_key = 0;
+      z_key = 0;
+      key = z_key * 1000000 + y_key * 1000 + x_key;
+      region_map[key] = mat_id.at(material_num);
+      nx_divisions++;
+      material_num = (material_num == 0) ? 1 : 0;
+    }
+
+    x.push_back(problem_dist);
+    y_start.push_back(0.0);
+    y_end.push_back(column_size);
+    n_y_cells.push_back(1);
+    z_start.push_back(0.0);
+    z_end.push_back(column_size);
+    n_z_cells.push_back(1);
+
+    division_set(nx_divisions, ny_divisions, nz_divisions);
+
+    x.push_back(x_end.back());
+    y.push_back(y_end.back());
+    z.push_back(z_end.back());
+    silo_x = std::vector<float>(x.size());
+    silo_y = std::vector<float>(y.size());
+    silo_z = std::vector<float>(z.size());
+    for (uint32_t i = 0; i < x.size(); ++i)
+      silo_x[i] = x[i];
+    for (uint32_t j = 0; j < y.size(); ++j)
+      silo_y[j] = y[j];
+    for (uint32_t k = 0; k < z.size(); ++k)
+      silo_z[k] = z[k];
+  }
+
+  void generate_geometry_quadratic(void) {
+    // clear other/previous geometry data
+    x_start.clear();
+    x_end.clear();
+    y_start.clear();
+    y_end.clear();
+    z_start.clear();
+    z_end.clear();
+    n_x_cells.clear();
+    n_y_cells.clear();
+    n_z_cells.clear();
+    silo_x.clear();
+    silo_y.clear();
+    silo_z.clear();
+    region_map.clear();
+
+    uint32_t nx_divisions = 0;
+    uint32_t ny_divisions = 1;
+    uint32_t nz_divisions = 1;
+
+    uint32_t x_key, y_key, z_key, key, region_ID;
+
+    std::vector<float> x, y, z;
+
+    double cur_dist;
+
+    // Problem parameters
+    std::vector<double> mid_value, delta_t, delta_m, param_a, param_b, param_c, limiting_value_chord;
+    for (int m = 0; m < num_materials; m++) {
+      if (mat_quad_minmax.at(m) == "max") {
+        mid_value.push_back(mid_value_max_func(mat_chord_start.at(m), mat_chord_end.at(m), mat_quad_mult.at(m)));
+      } else if (mat_quad_minmax.at(m) == "min") {
+        mid_value.push_back(mid_value_min_func(mat_chord_start.at(m), mat_chord_end.at(m), mat_quad_mult.at(m)));
+      } else {
+        std::cout << "Quadratic min/max not recognized in <quad> setting. Please use \"min\" or \"max\". Exiting..." << std::endl;
+        exit(EXIT_FAILURE);
+      }
+      delta_t.push_back(mat_chord_end.at(m) - mat_chord_start.at(m));
+      delta_m.push_back(mid_value.at(m) - mat_chord_start.at(m));
+      param_c.push_back(calc_c(mat_chord_start.at(m)));
+      param_b.push_back(calc_b(delta_m.at(m), delta_t.at(m), problem_dist));
+      param_a.push_back(calc_a(delta_t.at(m), param_b.at(m), problem_dist));
+      limiting_value_chord.push_back(std::min(mid_value.at(m), std::min(mat_chord_start.at(m), mat_chord_end.at(m))));
+    }
+
+    // push back the master x points for silo
+    double rand_num = g_rng->generate_random_number();
+    double cons_dist = 0.0, dist = 0.0, chord_start, chord_end;
+    int material_num;
+    double prob_accept, buffer_chord;
+
+    // Starting material volume fraction is set by initial chord lengths
+    material_num = (rand_num < mat_chord_start.at(0) / (mat_chord_start.at(0) + mat_chord_start.at(1))) ? 0 : 1;
+
+    y.push_back(0.0);
+    z.push_back(0.0);
+
+    while (cons_dist < problem_dist) {
+      dist = 0.0;
+      x_start.push_back(cons_dist);
+      chord_start = mat_chord_start.at(material_num);
+      chord_end = mat_chord_end.at(material_num);
+
+      // Loop for rejection sampling
+      bool accepted = false;
+      while (!accepted) {
+        // Generate a random number
+        rand_num = g_rng->generate_random_number();
+
+        // Sample from a homogeneous distribution of intensity equal to maximum chord
+        dist -= limiting_value_chord.at(material_num) * log(rand_num);
+        if (dist > problem_dist) break;
+
+        // Maximum value achieved with minimum length chord
+        // Or, conversely, the inverse of the chord (therefore inverse division)
+        buffer_chord = quad_chord(param_a.at(material_num), param_b.at(material_num), param_c.at(material_num), cons_dist + dist);
+        prob_accept = limiting_value_chord.at(material_num) / buffer_chord;
+
+        rand_num = g_rng->generate_random_number();
+        if (rand_num < prob_accept)
+          accepted = true;
+      }
+      cons_dist += dist;
+      // Check on thickness to not overshoot the boundary
+      if (cons_dist > problem_dist) {
+        dist += problem_dist - cons_dist;
+        cons_dist = problem_dist;
+      }
+      // Further discretize geometry
+      for (uint32_t i = 0; i < sublayer_cells; i++) {
+        cur_dist = cons_dist - dist + (dist / static_cast<double>(sublayer_cells) * static_cast<double>(i));
+        if (cur_dist != problem_dist)
+          x.push_back(cur_dist);
+      }
+      x_end.push_back(cons_dist);
+      n_x_cells.push_back(sublayer_cells);
+
+      x_key = nx_divisions;
+      y_key = 0;
+      z_key = 0;
+      key = z_key * 1000000 + y_key * 1000 + x_key;
+      region_map[key] = mat_id.at(material_num);
+      nx_divisions++;
+      material_num = (material_num == 0) ? 1 : 0;
+    }
+
+    x.push_back(problem_dist);
+    y_start.push_back(0.0);
+    y_end.push_back(column_size);
+    n_y_cells.push_back(1);
+    z_start.push_back(0.0);
+    z_end.push_back(column_size);
+    n_z_cells.push_back(1);
+
+    division_set(nx_divisions, ny_divisions, nz_divisions);
+
+    x.push_back(x_end.back());
+    y.push_back(y_end.back());
+    z.push_back(z_end.back());
+    silo_x = std::vector<float>(x.size());
+    silo_y = std::vector<float>(y.size());
+    silo_z = std::vector<float>(z.size());
+    for (uint32_t i = 0; i < x.size(); ++i)
+      silo_x[i] = x[i];
+    for (uint32_t j = 0; j < y.size(); ++j)
+      silo_y[j] = y[j];
+    for (uint32_t k = 0; k < z.size(); ++k)
+      silo_z[k] = z[k];
+  }
+
+  void generate_geometry_quadratic_piecewise_direct(void) {
+    // clear other/previous geometry data
+    x_start.clear();
+    x_end.clear();
+    y_start.clear();
+    y_end.clear();
+    z_start.clear();
+    z_end.clear();
+    n_x_cells.clear();
+    n_y_cells.clear();
+    n_z_cells.clear();
+    silo_x.clear();
+    silo_y.clear();
+    silo_z.clear();
+    region_map.clear();
+
+    uint32_t nx_divisions = 0;
+    uint32_t ny_divisions = 1;
+    uint32_t nz_divisions = 1;
+
+    uint32_t x_key, y_key, z_key, key, region_ID;
+
+    std::vector<float> x, y, z;
+
+    double cur_dist;
+
+    // Problem parameters
+    std::vector<double> mid_value, delta_t, delta_m, param_a, param_b, param_c, first_value;
+    for (int m = 0; m < num_materials; m++) {
+      if (mat_quad_minmax.at(m) == "max") {
+        mid_value.push_back(mid_value_max_func(mat_chord_start.at(m), mat_chord_end.at(m), mat_quad_mult.at(m)));
+      } else if (mat_quad_minmax.at(m) == "min") {
+        mid_value.push_back(mid_value_min_func(mat_chord_start.at(m), mat_chord_end.at(m), mat_quad_mult.at(m)));
+      } else {
+        std::cout << "Quadratic min/max not recognized in <quad> setting. Please use \"min\" or \"max\". Exiting..." << std::endl;
+        exit(EXIT_FAILURE);
+      }
+      delta_t.push_back(mat_chord_end.at(m) - mat_chord_start.at(m));
+      delta_m.push_back(mid_value.at(m) - mat_chord_start.at(m));
+      param_c.push_back(calc_c(mat_chord_start.at(m)));
+      param_b.push_back(calc_b(delta_m.at(m), delta_t.at(m), problem_dist));
+      param_a.push_back(calc_a(delta_t.at(m), param_b.at(m), problem_dist));
+      first_value.push_back(piecewise_constant_quad_chord(param_a.at(m), param_b.at(m), param_c.at(m), piecewise_segments, problem_dist, 0.0));
+    }
+
+    // push back the master x points for silo
+    double rand_num = g_rng->generate_random_number();
+    double cons_dist = 0.0, dist = 0.0;
+    int material_num;
+
+    // Iteration values
+    bool accepted;
+    int segment, current_segment;
+    double first_portion, middle_portion;
+
+    // Determine first material to use
+    // For piecewise constant model, initial distance is at 0.0 and so the probability is equivalent to the term ratio of the averages of the first segments
+    material_num = (rand_num < first_value.at(0) / (first_value.at(0) + first_value.at(1))) ? 0 : 1;
+
+    // Delta distance in piecewise function (required to obtain chords at each segment)
+    double delta_dist = problem_dist / static_cast<double>(piecewise_segments);
+
+    while (cons_dist < problem_dist) {
+      // Generate a random number
+      g_rng->generate_random_number();
+
+      // Loop for sampling distance (required to test each segment of piecewise function)
+      // Note that segments are zero-indexed
+      accepted = false;
+      // Start at current segment
+      current_segment = static_cast<int>(cons_dist / delta_dist);
+      segment = current_segment;
+      while(!accepted) {
+        if (segment > current_segment) {
+          first_portion = ((current_segment + 1) * delta_dist - cons_dist) / piecewise_constant_quad_chord(param_a.at(material_num), param_b.at(material_num), param_c.at(material_num), piecewise_segments, problem_dist, cons_dist);
+          middle_portion = 0.0;
+          for (int k = current_segment + 1; k < segment; k++) {
+            middle_portion += delta_dist / piecewise_constant_quad_chord(param_a.at(material_num), param_b.at(material_num), param_c.at(material_num), piecewise_segments, problem_dist, (static_cast<double>(k) + 0.5) * delta_dist);
+          }
+          dist = segment * delta_dist - piecewise_constant_quad_chord(param_a.at(material_num), param_b.at(material_num), param_c.at(material_num), piecewise_segments, problem_dist, (static_cast<double>(segment) + 0.5) * delta_dist) * (log(rand_num) + middle_portion + first_portion) - cons_dist;
+        } else {
+          dist = -log(rand_num) * piecewise_constant_quad_chord(param_a.at(material_num), param_b.at(material_num), param_c.at(material_num), piecewise_segments, problem_dist, cons_dist);
+        }
+        if (dist > (problem_dist - cons_dist))
+          dist = problem_dist - cons_dist;
+        if ((dist + cons_dist > (segment + 1) * delta_dist) || (dist + cons_dist < segment * delta_dist)) {
+          segment++;
+        } else {
+          accepted = 1;
+          // Test for negative
+          if (dist < 0.0) {
+            accepted = 0;
+            dist = 0.0;
+            rand_num = g_rng->generate_random_number();
+          }
+        }
+      }
+      cons_dist += dist;
+      // Check on thickness to not overshoot the boundary
+      if (cons_dist > problem_dist) {
+        dist += problem_dist - cons_dist;
+        cons_dist = problem_dist;
+      }
+      // Further discretize geometry
+      for (uint32_t i = 0; i < sublayer_cells; i++) {
+        cur_dist = cons_dist - dist + (dist / static_cast<double>(sublayer_cells) * static_cast<double>(i));
+        if (cur_dist != problem_dist)
+          x.push_back(cur_dist);
+      }
+      x_end.push_back(cons_dist);
+      n_x_cells.push_back(sublayer_cells);
+      x_key = nx_divisions;
+      y_key = 0;
+      z_key = 0;
+      key = z_key * 1000000 + y_key * 1000 + x_key;
+      region_map[key] = mat_id.at(material_num);
+      nx_divisions++;
+      material_num = (material_num == 0) ? 1 : 0;
+    }
+
+    x.push_back(problem_dist);
+    y_start.push_back(0.0);
+    y_end.push_back(column_size);
+    n_y_cells.push_back(1);
+    z_start.push_back(0.0);
+    z_end.push_back(column_size);
+    n_z_cells.push_back(1);
+
+    division_set(nx_divisions, ny_divisions, nz_divisions);
+
+    x.push_back(x_end.back());
+    y.push_back(y_end.back());
+    z.push_back(z_end.back());
+    silo_x = std::vector<float>(x.size());
+    silo_y = std::vector<float>(y.size());
+    silo_z = std::vector<float>(z.size());
+    for (uint32_t i = 0; i < x.size(); ++i)
+      silo_x[i] = x[i];
+    for (uint32_t j = 0; j < y.size(); ++j)
+      silo_y[j] = y[j];
+    for (uint32_t k = 0; k < z.size(); ++k)
+      silo_z[k] = z[k];
+  }
+
+  void generate_geometry_quadratic_piecewise(void) {
+    // clear other/previous geometry data
+    x_start.clear();
+    x_end.clear();
+    y_start.clear();
+    y_end.clear();
+    z_start.clear();
+    z_end.clear();
+    n_x_cells.clear();
+    n_y_cells.clear();
+    n_z_cells.clear();
+    silo_x.clear();
+    silo_y.clear();
+    silo_z.clear();
+    region_map.clear();
+
+    uint32_t nx_divisions = 0;
+    uint32_t ny_divisions = 1;
+    uint32_t nz_divisions = 1;
+
+    uint32_t x_key, y_key, z_key, key, region_ID;
+
+    std::vector<float> x, y, z;
+
+    double cur_dist;
+
+    // Problem parameters
+    // Limiting value that the chord possesses for the maximum value computed (for rejection purposes)
+    // As exponential distribution is computed using the inverse of the chrod-length, the minimum value is chosen
+    std::vector<double> mid_value, delta_t, delta_m, param_a, param_b, param_c, first_value, end_value, limiting_value_chord;
+    for (int m = 0; m < num_materials; m++) {
+      if (mat_quad_minmax.at(m) == "max") {
+        mid_value.push_back(mid_value_max_func(mat_chord_start.at(m), mat_chord_end.at(m), mat_quad_mult.at(m)));
+      } else if (mat_quad_minmax.at(m) == "min") {
+        mid_value.push_back(mid_value_min_func(mat_chord_start.at(m), mat_chord_end.at(m), mat_quad_mult.at(m)));
+      } else {
+        std::cout << "Quadratic min/max not recognized in <quad> setting. Please use \"min\" or \"max\". Exiting..." << std::endl;
+        exit(EXIT_FAILURE);
+      }
+      delta_t.push_back(mat_chord_end.at(m) - mat_chord_start.at(m));
+      delta_m.push_back(mid_value.at(m) - mat_chord_start.at(m));
+      param_c.push_back(calc_c(mat_chord_start.at(m)));
+      param_b.push_back(calc_b(delta_m.at(m), delta_t.at(m), problem_dist));
+      param_a.push_back(calc_a(delta_t.at(m), param_b.at(m), problem_dist));
+      first_value.push_back(piecewise_constant_quad_chord(param_a.at(m), param_b.at(m), param_c.at(m), piecewise_segments, problem_dist, 0.0));
+      end_value.push_back(piecewise_constant_quad_chord(param_a.at(m), param_b.at(m), param_c.at(m), piecewise_segments, problem_dist, problem_dist));
+      limiting_value_chord.push_back(std::min(mid_value.at(m), std::min(first_value.at(m), end_value.at(m))));
+    }
+
+    // push back the master x points for silo
+    double rand_num = g_rng->generate_random_number();
+    double cons_dist = 0.0, dist = 0.0;
+    int material_num;
+    double prob_accept, buffer_chord;
+
+    // Determine first material to use
+    // For piecewise constant model, initial distance is at 0.0 and so the probability is equivalent to the term ratio of the averages of the first segments
+    material_num = (rand_num < first_value.at(0) / (first_value.at(0) + first_value.at(1))) ? 0 : 1;
+
+    while (cons_dist < problem_dist) {
+      dist = 0.0;
+
+      // Loop for rejection sampling
+      bool accepted = false;
+      while (!accepted) {
+        // Generate a random number
+        rand_num = g_rng->generate_random_number();
+
+        // Sample from a homogeneous distribution of intensity equal to maximum chord
+        dist -= limiting_value_chord.at(material_num) * log(rand_num);
+        if (dist > problem_dist) break;
+
+        // Maximum value achieved with minimum length chord
+        // Or, conversely, the inverse of the chord (therefore inverse division)
+        buffer_chord = piecewise_constant_quad_chord(param_a.at(material_num), param_b.at(material_num), param_c.at(material_num), piecewise_segments, problem_dist, cons_dist + dist);
+        prob_accept = limiting_value_chord.at(material_num) / buffer_chord;
+
+        rand_num = g_rng->generate_random_number();
+        if (rand_num < prob_accept)
+          accepted = true;
+      }
+      cons_dist += dist;
+      // Check on thickness to not overshoot the boundary
+      if (cons_dist > problem_dist) {
+        dist += problem_dist - cons_dist;
+        cons_dist = problem_dist;
+      }
+      // Further discretize geometry
+      for (uint32_t i = 0; i < sublayer_cells; i++) {
+        cur_dist = cons_dist - dist + (dist / static_cast<double>(sublayer_cells) * static_cast<double>(i));
+        if (cur_dist != problem_dist)
+          x.push_back(cur_dist);
+      }
+      x_end.push_back(cons_dist);
+      n_x_cells.push_back(sublayer_cells);
+      x_key = nx_divisions;
+      y_key = 0;
+      z_key = 0;
+      key = z_key * 1000000 + y_key * 1000 + x_key;
+      region_map[key] = mat_id.at(material_num);
       nx_divisions++;
       material_num = (material_num == 0) ? 1 : 0;
     }
@@ -998,10 +1914,11 @@ private:
   uint64_t num_realizations, realization_print;
   uint32_t num_materials;
   double column_size, problem_dist;
-  uint32_t sublayer_cells, structured_cells;
+  uint32_t sublayer_cells, structured_cells, piecewise_segments;
   std::string chord_model;
+  std::vector<std::string> mat_quad_minmax;
   std::vector<int> mat_id;
-  std::vector<double> mat_chord_start, mat_chord_end, mat_opacA, mat_opacB, mat_opacC, mat_opacS, mat_T_e, mat_T_r, mat_dens, mat_CV;
+  std::vector<double> mat_chord_start, mat_chord_end, mat_quad_mult, mat_opacA, mat_opacB, mat_opacC, mat_opacS, mat_T_e, mat_T_r, mat_dens, mat_CV;
 
   // flags
   bool write_silo; //!< Dump SILO output files
