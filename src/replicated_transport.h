@@ -36,6 +36,7 @@ Constants::event_type transport_photon(Photon &phtn, const Mesh &mesh, RNG *rng,
   using Constants::ELEMENT;
   using Constants::REFLECT;
   using Constants::VACUUM;
+  using Constants::SOURCE;
   // events
   using Constants::bc_type;
   using Constants::c;
@@ -116,7 +117,7 @@ Constants::event_type transport_photon(Photon &phtn, const Mesh &mesh, RNG *rng,
           phtn.set_cell(next_cell);
           cell_id = next_cell;
           cell = mesh.get_on_rank_cell(cell_id);
-        } else if (boundary_event == VACUUM) {
+        } else if (boundary_event == VACUUM || boundary_event == SOURCE) {
           exit_E += phtn.get_E();
           active = false;
           event = EXIT;
@@ -196,8 +197,8 @@ std::vector<Photon> replicated_transport(Source &source, const Mesh &mesh,
     }
   } // end while
 
-  // comb the photon population to keep it from growing unbounded. I hardcode
-  // the taget comb value to be 10% of the user requested photons divided
+  // comb the photon population to keep it from growing unbounded. I hardcoded
+  // the target comb value to be 10% of the user requested photons divided
   // by the number of replicated ranks
   comb_photons(census_list, max_census_photons, rng);
 

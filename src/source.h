@@ -70,6 +70,7 @@ public:
 
     uint32_t n_cell = mesh.get_n_local_cells();
     E_cell_emission = mesh.get_emission_E();
+    E_cell_boundary = mesh.get_boundary_E();
     E_cell_census = mesh.get_census_E();
 
     uint32_t step = imc_s.get_step();
@@ -85,6 +86,7 @@ public:
     const Cell *cell_ptr;
     for (uint32_t i = 0; i < n_cell; ++i) {
       Work_Packet temp_cell_work;
+      Work_Packet temp_boundary_work;
       cell_ptr = mesh.get_cell_ptr(i);
       //emission
       if (E_cell_emission[i] > 0.0) {
@@ -101,6 +103,22 @@ public:
         temp_cell_work.set_coor(cell_ptr->get_node_array());
         temp_cell_work.set_source_type(Constants::EMISSION);
         work.push_back(temp_cell_work);
+      }
+      //boundary
+      if (E_cell_boundary[i] > 0.0) {
+        uint32_t t_num_boundary =
+            int(user_photons * E_cell_boundary[i] / total_E);
+        // make at least one photon to represent boundary energy
+        if (t_num_boundary == 0)
+          t_num_boundary = 1;
+        n_photon += t_num_boundary;
+        // make work packet and add to vector
+        temp_boundary_work.set_global_cell_ID(cell_ptr->get_ID());
+        temp_boundary_work.set_global_grip_ID(cell_ptr->get_grip_ID());
+        temp_boundary_work.attach_creation_work(E_cell_boundary[i], t_num_boundary);
+        temp_boundary_work.set_coor(cell_ptr->get_node_array());
+        temp_boundary_work.set_source_type(Constants::BOUNDARY);
+        work.push_back(temp_boundary_work);
       }
       // initial census
       if (step == 1) {
@@ -142,7 +160,7 @@ public:
   //! Print source census balance
   void print_work_summary(const int &rank) const {
     std::cout << "rank: " << rank
-              << " emission: " << n_photon - census_photons.size();
+              << " emission + boundary: " << n_photon - census_photons.size();
     std::cout << " census: " << census_photons.size();
     std::cout << " fraction census: "
               << census_photons.size() / double(n_photon);
@@ -244,6 +262,8 @@ public:
     if (iphoton < n_create) {
       if (current_source == Constants::EMISSION)
         get_emission_photon(return_photon, *iwork, phtn_E, dt, rng);
+      else if (current_source == Constants::BOUNDARY)
+        get_boundary_photon(return_photon, *iwork, phtn_E, dt, rng);
       else if (current_source == Constants::INITIAL_CENSUS)
         get_initial_census_photon(return_photon, *iwork, phtn_E, dt, rng);
       iphoton++;
@@ -297,6 +317,22 @@ public:
         std::floor(rng->generate_random_number() * double(BRANSON_N_GROUPS)));
   }
 
+  //! Set input photon to the next boundary photon
+  void get_boundary_photon(Photon &boundary_photon, Work_Packet &work,
+                           const double &phtn_E, const double &dt, RNG *rng) {
+    using Constants::c;
+    double pos[3];
+    double angle[3];
+    work.uniform_position_on_face(rng, pos);
+    get_source_angle(angle, rng);
+    boundary_photon.set_position(pos);
+    boundary_photon.set_E0(phtn_E);
+    boundary_photon.set_distance_to_census(rng->generate_random_number() * c * dt);
+    boundary_photon.set_cell(work.get_global_cell_ID());
+    boundary_photon.set_grip(work.get_global_grip_ID());
+    boundary_photon.set_group(std::floor(rng->generate_random_number() * double(BRANSON_N_GROUPS)));
+  }
+
   //! Set input photon to the next intiial census photon
   void get_initial_census_photon(Photon &census_photon, Work_Packet &work,
                                  const double &phtn_E, const double &dt,
@@ -335,6 +371,7 @@ private:
   std::vector<Work_Packet>::iterator iwork; //!< Work iterator
   uint64_t n_photon;                        //!< Total photons in this source
   std::vector<double> E_cell_emission;      //!< Emission energy in each cell
+  std::vector<double> E_cell_boundary;      //!< Boundary source energy in each cell
   std::vector<double> E_cell_census; //!< Initial census energy in each cell
 };
 

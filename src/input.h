@@ -48,6 +48,7 @@ public:
   Input(std::string fileName, const MPI_Types &mpi_types) {
     using Constants::ELEMENT;
     using Constants::REFLECT;
+    using Constants::SOURCE;
     using Constants::VACUUM;
     using Constants::X_NEG;
     using Constants::X_POS;
@@ -138,6 +139,7 @@ public:
         exit(EXIT_FAILURE);
       }
       n_photons = static_cast<uint64_t>(n_photons_long);
+      T_source = settings_node.child("source_temp").text().as_double();
       seed = settings_node.child("seed").text().as_int();
       output_freq = settings_node.child("output_frequency").text().as_int();
 
@@ -390,6 +392,8 @@ public:
           bc[X_POS] = REFLECT;
         else if (tempString == "VACUUM")
           bc[X_POS] = VACUUM;
+        else if (tempString == "SOURCE")
+          bc[X_POS] = SOURCE;
         else
           b_error = true;
 
@@ -398,6 +402,8 @@ public:
           bc[X_NEG] = REFLECT;
         else if (tempString == "VACUUM")
           bc[X_NEG] = VACUUM;
+        else if (tempString == "SOURCE")
+          bc[X_NEG] = SOURCE;
         else
           b_error = true;
 
@@ -406,6 +412,8 @@ public:
           bc[Y_POS] = REFLECT;
         else if (tempString == "VACUUM")
           bc[Y_POS] = VACUUM;
+        else if (tempString == "SOURCE")
+          bc[Y_POS] = SOURCE;
         else
           b_error = true;
 
@@ -414,6 +422,8 @@ public:
           bc[Y_NEG] = REFLECT;
         else if (tempString == "VACUUM")
           bc[Y_NEG] = VACUUM;
+        else if (tempString == "SOURCE")
+          bc[Y_NEG] = SOURCE;
         else
           b_error = true;
 
@@ -422,6 +432,8 @@ public:
           bc[Z_POS] = REFLECT;
         else if (tempString == "VACUUM")
           bc[Z_POS] = VACUUM;
+        else if (tempString == "SOURCE")
+          bc[Z_POS] = SOURCE;
         else
           b_error = true;
 
@@ -430,6 +442,8 @@ public:
           bc[Z_NEG] = REFLECT;
         else if (tempString == "VACUUM")
           bc[Z_NEG] = VACUUM;
+        else if (tempString == "SOURCE")
+          bc[Z_NEG] = SOURCE;
         else
           b_error = true;
 
@@ -439,7 +453,7 @@ public:
         }
       } else {
         bc[X_POS] = VACUUM;
-        bc[X_NEG] = VACUUM;
+        bc[X_NEG] = SOURCE;
         bc[Y_POS] = REFLECT;
         bc[Y_NEG] = REFLECT;
         bc[Z_POS] = REFLECT;

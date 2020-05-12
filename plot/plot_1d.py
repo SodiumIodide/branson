@@ -54,14 +54,20 @@ def plot1d(args):
     directory = args.directory
     h5files = [f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f)) and f.endswith(".h5")]
     # Find maximum (one loop)
-    max_t_r = 0.0
-    max_t_e = 0.0
+    max_t_r = sys.float_info.min
+    max_t_e = sys.float_info.min
+    min_t_r = sys.float_info.max
+    min_t_e = sys.float_info.max
     for h5file in h5files:
         file = h5py.File(h5file, 'r')
         max_t_r = max(file['m0_t_r']) if max(file['m0_t_r']) > max_t_r else max_t_r
         max_t_r = max(file['m1_t_r']) if max(file['m1_t_r']) > max_t_r else max_t_r
         max_t_e = max(file['m0_t_e']) if max(file['m0_t_e']) > max_t_e else max_t_e
         max_t_e = max(file['m1_t_e']) if max(file['m1_t_e']) > max_t_e else max_t_e
+        min_t_r = min(file['m0_t_r']) if min(file['m0_t_r']) < min_t_r else min_t_r
+        min_t_r = min(file['m1_t_r']) if min(file['m1_t_r']) < min_t_r else min_t_r
+        min_t_e = min(file['m0_t_e']) if min(file['m0_t_e']) < min_t_e else min_t_e
+        min_t_e = min(file['m1_t_e']) if min(file['m1_t_e']) < min_t_e else min_t_e
     sort_nicely(h5files)
     for imagenumber, h5file in enumerate(h5files):
         file = h5py.File(h5file, 'r')
@@ -75,7 +81,8 @@ def plot1d(args):
         m1_te = file['m1_t_e']
         plt.plot(x_data, m0_tr, color='b', label="Material 0 T_r")
         plt.plot(x_data, m1_tr, color='r', label="Material 1 T_r")
-        plt.ylim(ymin=0.0, ymax=max_t_r)
+        plt.ylim(ymin=min_t_r, ymax=max_t_r)
+        plt.yscale('log')
         plt.grid(which='both', axis='both')
         plt.legend(loc='best')
         plt.title(f"Timestep {imagenumber + 1}")
@@ -86,7 +93,8 @@ def plot1d(args):
         plt.clf()
         plt.plot(x_data, m0_te, color='b', label="Material 0 T_e")
         plt.plot(x_data, m1_te, color='r', label="Material 1 T_e")
-        plt.ylim(ymin=0.0, ymax=max_t_e)
+        plt.ylim(ymin=min_t_e, ymax=max_t_e)
+        plt.yscale('log')
         plt.grid(which='both', axis='both')
         plt.legend(loc='best')
         plt.title(f"Timestep {imagenumber + 1}")

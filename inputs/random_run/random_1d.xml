@@ -8,6 +8,7 @@
     <dt_max>1.0</dt_max>
     <photons>160000</photons>
     <seed>14706</seed>
+    <source_temp>1.0</source_temp>
     <tilt>FALSE</tilt>
     <stratified_sampling>FALSE</stratified_sampling>
     <use_combing>TRUE</use_combing>

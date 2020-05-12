@@ -72,6 +72,13 @@ public:
     pos[2] = nodes[4] + rng->generate_random_number() * (nodes[5] - nodes[4]);
   }
 
+  //! Set an input array to a random position on a face
+  void uniform_position_on_face(RNG *rng, double *pos) const {
+    pos[0] = nodes[0];
+    pos[1] = nodes[2] + rng->generate_random_number() * (nodes[3] - nodes[2]);
+    pos[2] = nodes[4] + rng->generate_random_number() * (nodes[5] - nodes[4]);
+  }
+
   //! Return a pointer to the start of the node array
   const double *get_node_array(void) const { return nodes; }
 
@@ -153,7 +160,7 @@ private:
   uint32_t g_grip_ID;          //!< Global index of this cell's grip
   uint32_t n_create;           //!< Photons to create in this cell
   uint32_t n_census;           //!< Census photons in this cell
-  uint32_t source_type;        //!< Type of particles, census or emission
+  uint32_t source_type;        //!< Type of particles - census, boundary, or emission
   uint32_t census_index_start; //!< Start index in census vector
   double create_E; //!< Emission or intial census energy in work packet
   double nodes[6]; //!< Nodes forming 3D cell

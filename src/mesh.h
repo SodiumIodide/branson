@@ -56,7 +56,7 @@ public:
         rank(mpi_info.get_rank()), n_rank(mpi_info.get_n_rank()),
         total_photon_E(0.0), off_rank_reads(0), silo_x(input.get_silo_x()),
         silo_y(input.get_silo_y()), silo_z(input.get_silo_z()),
-        regions(input.get_regions()) {
+        regions(input.get_regions()), T_source(input.get_source_T()) {
     using Constants::bc_type;
     using Constants::ELEMENT;
     using Constants::X_NEG;
@@ -83,6 +83,7 @@ public:
     m_census_E.resize(n_cell);
     m_emission_E.resize(n_cell);
     m_source_E.resize(n_cell);
+    m_boundary_E.resize(n_cell);
     T_r.resize(n_cell);
 
     // for replicated mode, set the factor that reduces the emission
@@ -146,7 +147,7 @@ public:
 
   Cell get_on_rank_cell(const uint32_t index) const {
     // this can only be called after with valid cell index (on rank or in stored
-    // cells vector
+    // cells vector)
     return cells[index - on_rank_start];
   }
 
@@ -157,6 +158,7 @@ public:
   std::vector<double> get_census_E(void) const { return m_census_E; }
   std::vector<double> get_emission_E(void) const { return m_emission_E; }
   std::vector<double> get_source_E(void) const { return m_source_E; }
+  std::vector<double> get_boundary_E(void) const {return m_boundary_E; }
 
   //! Get the radiation temperature in a cell (for plotting/diagnostics)
   double get_T_r(const uint32_t cell_index) const { return T_r[cell_index]; }
@@ -178,6 +180,13 @@ public:
   void calculate_photon_energy(IMC_State &imc_state) {
     using Constants::a;
     using Constants::c;
+    using Constants::SOURCE;
+    using Constants::X_NEG;
+    using Constants::X_POS;
+    using Constants::Y_NEG;
+    using Constants::Y_POS;
+    using Constants::Z_NEG;
+    using Constants::Z_POS;
     total_photon_E = 0.0;
     double dt = imc_state.get_dt();
     double op_a, op_s, f, cV, rho;
@@ -187,6 +196,7 @@ public:
     double tot_census_E = 0.0;
     double tot_emission_E = 0.0;
     double tot_source_E = 0.0;
+    double tot_boundary_E = 0.0;
     double pre_mat_E = 0.0;
 
     uint32_t region_ID;
@@ -210,6 +220,20 @@ public:
       e.set_op_s(op_s);
       e.set_f(f);
 
+      m_boundary_E[i] = 0.0;
+      if (e.get_bc(X_POS) == SOURCE)
+        m_boundary_E[i] += dt * op_a * a * c * pow(T_source, 4);
+      if (e.get_bc(X_NEG) == SOURCE)
+        m_boundary_E[i] += dt * op_a * a * c * pow(T_source, 4);
+      if (e.get_bc(Y_POS) == SOURCE)
+        m_boundary_E[i] += dt * op_a * a * c * pow(T_source, 4);
+      if (e.get_bc(Y_NEG) == SOURCE)
+        m_boundary_E[i] += dt * op_a * a * c * pow(T_source, 4);
+      if (e.get_bc(Z_POS) == SOURCE)
+        m_boundary_E[i] += dt * op_a * a * c * pow(T_source, 4);
+      if (e.get_bc(Z_NEG) == SOURCE)
+        m_boundary_E[i] += dt * op_a * a * c * pow(T_source, 4);
+
       m_emission_E[i] =
           replicated_factor * dt * vol * f * op_a * a * c * pow(T, 4);
       if (step > 1)
@@ -222,7 +246,8 @@ public:
       tot_emission_E += m_emission_E[i];
       tot_census_E += m_census_E[i];
       tot_source_E += m_source_E[i];
-      total_photon_E += m_emission_E[i] + m_census_E[i] + m_source_E[i];
+      tot_boundary_E += m_boundary_E[i];
+      total_photon_E += m_emission_E[i] + m_census_E[i] + m_source_E[i] + m_boundary_E[i];
     }
 
     // set energy for conservation checks
@@ -292,6 +317,9 @@ public:
   //! Get external source energy vector needed to source particles
   std::vector<double> &get_source_E_ref(void) { return m_source_E; }
 
+  //! Get boundary source energy vector needed to source particles
+  std::vector<double> &get_boundary_E_ref(void) { return m_boundary_E; }
+
   //--------------------------------------------------------------------------//
   // member variables
   //--------------------------------------------------------------------------//
@@ -305,6 +333,7 @@ private:
   int32_t n_rank; //!< Number of global ranks
 
   double total_photon_E;   //!< Total photon energy on the mesh
+  double T_source;         //!< Source temperature from input file
   uint32_t off_rank_reads; //!< Number of off rank reads
 
   const std::vector<float>
@@ -324,6 +353,7 @@ private:
   std::vector<double> m_census_E;   //!< Census energy vector
   std::vector<double> m_emission_E; //!< Emission energy vector
   std::vector<double> m_source_E;   //!< Source energy vector
+  std::vector<double> m_boundary_E; //!< Boundary energy vector
   std::vector<double> T_r;          //!< Diagnostic quantity
 
   Cell *cells; //!< Cell data allocated with MPI_Alloc

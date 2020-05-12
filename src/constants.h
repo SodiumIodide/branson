@@ -22,10 +22,10 @@ const double k(1.60219e-31); //!< energy conversion constant GJ/keV
 const double a(0.01372);     //!< Boltzmann constant in GJ/cm^3/keV^4
 const double a_SO(1.0);      //!< Boltzmann constant for SO problems
 
-enum bc_type { REFLECT, VACUUM, ELEMENT }; //!< Boundary conditions
+enum bc_type { REFLECT, VACUUM, SOURCE, ELEMENT }; //!< Boundary conditions
 enum dir_type { X_NEG, X_POS, Y_NEG, Y_POS, Z_NEG, Z_POS }; //!< Directions
 enum event_type { KILL, EXIT, CENSUS, WAIT };               //!< Events
-enum { EMISSION, INITIAL_CENSUS }; //!< Particle type for work packets
+enum { EMISSION, BOUNDARY, INITIAL_CENSUS }; //!< Particle type for work packets
 
 }; // namespace Constants
 

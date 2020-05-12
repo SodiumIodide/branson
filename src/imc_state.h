@@ -48,6 +48,7 @@ public:
     exit_E = 0.0;
     absorbed_E = 0.0;
     source_E = 0.0;
+    boundary_E = 0.0;
 
     // 64 bit
     trans_particles = 0;
@@ -138,6 +139,7 @@ public:
     // define global value
     double g_absorbed_E = 0.0;
     double g_emission_E = 0.0;
+    double g_boundary_E = 0.0;
     double g_pre_census_E = 0.0;
     double g_pre_mat_E = 0.0;
     double g_post_census_E = 0.0;
@@ -154,6 +156,8 @@ public:
     MPI_Allreduce(&absorbed_E, &g_absorbed_E, 1, MPI_DOUBLE, MPI_SUM,
                   MPI_COMM_WORLD);
     MPI_Allreduce(&emission_E, &g_emission_E, 1, MPI_DOUBLE, MPI_SUM,
+                  MPI_COMM_WORLD);
+    MPI_Allreduce(&boundary_E, &g_boundary_E, 1, MPI_DOUBLE, MPI_SUM,
                   MPI_COMM_WORLD);
     MPI_Allreduce(&pre_census_E, &g_pre_census_E, 1, MPI_DOUBLE, MPI_SUM,
                   MPI_COMM_WORLD);
@@ -179,7 +183,7 @@ public:
                   MPI_COMM_WORLD);
 
     double rad_conservation = (g_absorbed_E + g_post_census_E + g_exit_E) -
-                              (g_pre_census_E + g_emission_E + source_E);
+                              (g_pre_census_E + g_emission_E + g_boundary_E + source_E);
 
     double mat_conservation =
         g_post_mat_E - (g_pre_mat_E + g_absorbed_E - g_emission_E);
@@ -187,6 +191,7 @@ public:
     if (rank == 0) {
       cout << "Total Photons transported: " << g_trans_particles << endl;
       cout << "Emission E: " << g_emission_E
+           << "Boundary E: " << g_boundary_E
            << ", Absorption E: " << g_absorbed_E;
       cout << ", Exit E: " << g_exit_E << endl;
       cout << "Pre census E: " << g_pre_census_E << " Post census E: ";
@@ -233,6 +238,9 @@ public:
   //! Set absorbed energy for current timestep (diagnostic)
   void set_absorbed_E(double _absorbed_E) { absorbed_E = _absorbed_E; }
 
+  //! Set boundary source energy for current timestep (diagnostic)
+  void set_boundary_E(double _boundary_E) { boundary_E = _boundary_E; }
+
   //! Set exit energy from transport (diagnostic)
   void set_exit_E(double _exit_E) { exit_E = _exit_E; }
 
@@ -271,6 +279,7 @@ private:
   double exit_E;        //!< Energy exiting problem
   double absorbed_E;    //!< Total absorbed energy
   double source_E;      //!< Sourced energy
+  double boundary_E;    //!< Boundary source energy
 
   // diagnostic 64 bit integers relating to particle and cell counts
   uint64_t trans_particles; //!< Particles transported

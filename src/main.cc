@@ -69,7 +69,7 @@ int main(int argc, char **argv) {
     MPI_Barrier(MPI_COMM_WORLD);
     int num_realizations, realization_print; // used for random problem
     bool random_problem = input.get_random_problem();
-    bool write_output;
+    bool write_output = true;
     if (random_problem) {
       if (mpi_info.get_rank() == 0)
         cout << "DETECTED RANDOM PROBLEM" << endl << endl;
@@ -78,7 +78,6 @@ int main(int argc, char **argv) {
       write_output = false;
     } else {
       num_realizations = 1;
-      write_output = true;
     }
     if (mpi_info.get_rank() == 0)
       input.print_problem_info();
