@@ -2,8 +2,8 @@
   <common>
     <method>IMC</method>
     <t_start>0.0</t_start>
-    <t_stop>0.01</t_stop>
-    <dt_start>0.001</dt_start>
+    <t_stop>0.3335641</t_stop>
+    <dt_start>0.03335641</dt_start>
     <t_mult>1.0</t_mult>
     <dt_max>1.0</dt_max>
     <photons>160000</photons>
@@ -15,7 +15,7 @@
     <output_frequency>1</output_frequency>
     <write_silo>TRUE</write_silo>
   </common>
- 
+
   <debug_options>
     <print_verbose>TRUE</print_verbose>
     <print_mesh_info>TRUE</print_mesh_info>
@@ -24,7 +24,7 @@
   <random_spatial>
     <problem>
         <materials>2</materials>
-        <distance>10.0</distance>
+        <distance>1.0</distance>
         <column_size>0.1</column_size>
         <chord_model>constant</chord_model>
         <geometry_seed>1234</geometry_seed>
@@ -37,35 +37,35 @@
 
     <material>
         <ID>0</ID>
-        <chord_start>0.1</chord_start>
-        <chord_end>0.8</chord_end>
+        <chord_start>0.009</chord_start>
+        <chord_end>0.009</chord_end>
         <quad>max</quad>
         <quad_mult>2.0</quad_mult>
-        <opacA>5.0</opacA>
+        <opacA>90.10</opacA>
         <opacB>0.0</opacB>
         <opacC>0.0</opacC>
         <opacS>0.0</opacS>
-        <initial_T_e>1.0</initial_T_e>
-        <initial_T_r>1.0</initial_T_r>
+        <initial_T_e>0.0</initial_T_e>
+        <initial_T_r>0.0</initial_T_r>
         <density>1.0</density>
-        <CV>0.1</CV>
+        <CV>1.0</CV>
     </material>
 
     <material>
         <ID>1</ID>
-        <chord_start>0.5</chord_start>
-        <chord_end>0.3</chord_end>
+        <chord_start>0.891</chord_start>
+        <chord_end>0.891</chord_end>
         <quad>min</quad>
         <quad_mult>0.5</quad_mult>
         <opacA>50.0</opacA>
         <opacB>0.0</opacB>
         <opacC>0.0</opacC>
         <opacS>0.0</opacS>
-        <initial_T_e>0.01</initial_T_e>
-        <initial_T_r>0.01</initial_T_r>
+        <initial_T_e>0.0</initial_T_e>
+        <initial_T_r>0.0</initial_T_r>
         <density>1.0</density>
-        <CV>0.1</CV>
+        <CV>1.0</CV>
     </material>
   </random_spatial>
- 
+
 </prototype>

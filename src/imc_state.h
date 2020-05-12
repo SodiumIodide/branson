@@ -191,7 +191,7 @@ public:
     if (rank == 0) {
       cout << "Total Photons transported: " << g_trans_particles << endl;
       cout << "Emission E: " << g_emission_E
-           << "Boundary E: " << g_boundary_E
+           << ", Boundary E: " << g_boundary_E
            << ", Absorption E: " << g_absorbed_E;
       cout << ", Exit E: " << g_exit_E << endl;
       cout << "Pre census E: " << g_pre_census_E << " Post census E: ";
