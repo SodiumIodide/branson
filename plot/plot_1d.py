@@ -22,7 +22,7 @@ class FullPaths(argparse.Action):
 def is_dir(dirname):
     """Checks if a path is an actual directory"""
     if not os.path.isdir(dirname):
-        msg = "{0} is not a directory".format(dirname)
+        msg = f"{dirname} is not a directory"
         raise argparse.ArgumentTypeError(msg)
     else:
         return dirname
@@ -110,7 +110,7 @@ def plot1d(args):
     imageio.mimsave("t_e.gif", TE_IMAGES, fps=1)
 
 def main():
-    '''Main function'''
+    """Main function"""
     args = get_args()
     plot1d(args)
 
