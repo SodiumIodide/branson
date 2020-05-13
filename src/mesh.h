@@ -254,6 +254,7 @@ public:
     imc_state.set_pre_mat_E(pre_mat_E);
     imc_state.set_emission_E(tot_emission_E);
     imc_state.set_source_E(tot_source_E);
+    imc_state.set_boundary_E(tot_boundary_E);
     if (imc_state.get_step() == 1)
       imc_state.set_pre_census_E(tot_census_E);
   }

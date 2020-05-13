@@ -131,10 +131,10 @@ public:
 
           // Average the results, or just append if no results previously
           if (t_e_weight_tally != 0.0) {
-            structured_T_e.at(k).at(i).push(t_e_weight_tally / structured_delta);
+            structured_T_e.at(k).at(i).push(t_e_weight_tally / structured_delta);  // unit
           }
           if (t_r_weight_tally != 0.0) {
-            structured_T_r.at(k).at(i).push(t_r_weight_tally / structured_delta);
+            structured_T_r.at(k).at(i).push(t_r_weight_tally / structured_delta);  // unit
           }
         }  // Structured loop
       }  // Material loop

@@ -6,11 +6,6 @@ import matplotlib.pyplot as plt
 
 from plot_1d import get_args, sort_nicely
 
-TR_IMAGE_PATHS = []
-TE_IMAGE_PATHS = []
-TR_IMAGES = []
-TE_IMAGES = []
-
 TIME_DELTA = 0.03335641
 
 PROB_0 = 0.01

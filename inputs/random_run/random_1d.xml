@@ -6,7 +6,7 @@
     <dt_start>0.03335641</dt_start>
     <t_mult>1.0</t_mult>
     <dt_max>1.0</dt_max>
-    <photons>160000</photons>
+    <photons>16000</photons>
     <seed>14706</seed>
     <source_temp>1.0</source_temp>
     <tilt>FALSE</tilt>
@@ -31,7 +31,7 @@
         <sublayer_cells>10</sublayer_cells>
         <structured_cells>100</structured_cells>
         <piecewise_segments>100</piecewise_segments>
-        <realizations>10000</realizations>
+        <realizations>1000</realizations>
         <realization_print>1</realization_print>
     </problem>
 
@@ -45,8 +45,8 @@
         <opacB>0.0</opacB>
         <opacC>0.0</opacC>
         <opacS>0.0</opacS>
-        <initial_T_e>0.0</initial_T_e>
-        <initial_T_r>0.0</initial_T_r>
+        <initial_T_e>0.001</initial_T_e>
+        <initial_T_r>0.001</initial_T_r>
         <density>1.0</density>
         <CV>1.0</CV>
     </material>
@@ -57,12 +57,12 @@
         <chord_end>0.891</chord_end>
         <quad>min</quad>
         <quad_mult>0.5</quad_mult>
-        <opacA>50.0</opacA>
+        <opacA>0.10</opacA>
         <opacB>0.0</opacB>
         <opacC>0.0</opacC>
         <opacS>0.0</opacS>
-        <initial_T_e>0.0</initial_T_e>
-        <initial_T_r>0.0</initial_T_r>
+        <initial_T_e>0.001</initial_T_e>
+        <initial_T_r>0.001</initial_T_r>
         <density>1.0</density>
         <CV>1.0</CV>
     </material>
