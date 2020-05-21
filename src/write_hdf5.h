@@ -32,6 +32,9 @@ void write_hdf5(const Mesh &mesh, const double &arg_time, const uint32_t &step, 
   using std::stringstream;
   using std::vector;
 
+  // need a non-const double to pass
+  double time = arg_time;
+
   // generate a name for this hdf5 file
   stringstream ss;
   ss.setf(std::ios::showpoint);
