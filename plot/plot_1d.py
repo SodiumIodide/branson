@@ -7,7 +7,6 @@ import sys
 import re
 import imageio
 import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
 
 TR_IMAGE_PATHS = []
 TE_IMAGE_PATHS = []
@@ -105,9 +104,12 @@ def plot1d(args):
         plt.clf()
     for timestep in range(len(TR_IMAGE_PATHS)):
         TR_IMAGES.append(imageio.imread(TR_IMAGE_PATHS[timestep]))
-        TE_IMAGES.append(imageio.imread(TE_IMAGE_PATHS[timestep]))
+    TR_IMAGES.clear()
     imageio.mimsave("t_r.gif", TR_IMAGES, fps=1)
+    for timestep in range(len(TE_IMAGE_PATHS)):
+        TE_IMAGES.append(imageio.imread(TE_IMAGE_PATHS[timestep]))
     imageio.mimsave("t_e.gif", TE_IMAGES, fps=1)
+    TE_IMAGES.clear()
 
 def main():
     """Main function"""

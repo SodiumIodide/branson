@@ -111,7 +111,7 @@ public:
                   << std::endl;
         exit(EXIT_FAILURE);
       }
-      if ((spatial_node && simple_spatial_node) || (spatial_node && random_spatial_node) && (simple_spatial_node && random_spatial_node)) {
+      if ((spatial_node && simple_spatial_node) || (spatial_node && random_spatial_node) || (simple_spatial_node && random_spatial_node)) {
         std::cout
             << "Cannot specify more than one spatial section!"
             << std::endl;
